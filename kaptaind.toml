@@ -1,0 +1,38 @@
+# kaptaind configuration for the deliver workspace.
+
+health_port = 3097
+
+[watch]
+path = "."
+recursive = true
+ignore_file = ".kaptainignore"
+
+[cluster]
+window = 5
+
+[weights]
+s = 0.35
+a = 0.30
+d = 0.20
+r = 0.15
+
+[push]
+enabled = false
+branch = "master"
+
+[angler.git_hooks]
+enabled = false
+
+[ratelimit]
+min_commit_interval = 10
+
+[test]
+command = "cargo run -- --spec deliver.toml --strict --progress never"
+required = true
+
+[staging]
+mode = "cluster"
+exclude = ["target/**", ".kaptaind/**", "*.log", ".env*"]
+
+[commit]
+require_bump = false

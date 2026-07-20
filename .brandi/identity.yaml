@@ -1,0 +1,10 @@
+product:
+  name: deliver
+  tagline: "Deterministic deliverable validation"
+  mission: "Verify concrete task outputs with reproducible file, command, and Git checks."
+  aliases: []
+  former_names: []
+archetype: [explorer, engineer, challenger]
+terminology:
+  canonical: {}
+  banned_variants: {}

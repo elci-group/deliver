@@ -1,0 +1,45 @@
+[[file]]
+path = "src/lib.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "src/main.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "Cargo.toml"
+required = true
+
+[[file]]
+path = "README.md"
+required = true
+min_size_bytes = 1200
+require_regex = ["deliver --spec", "Output Modes", "Spec Reference"]
+
+[[file]]
+path = "man/deliver.1"
+required = true
+min_size_bytes = 900
+require_regex = ["\\.TH DELIVER 1", "--color", "--progress"]
+
+[[command]]
+name = "cargo test"
+cmd = ["cargo", "test"]
+expect_exit = 0
+timeout_secs = 300
+stdout_contains = ["test result: ok"]
+
+[[command]]
+name = "cargo build"
+cmd = ["cargo", "build"]
+expect_exit = 0
+timeout_secs = 300
+
+[[command]]
+name = "help lists output controls"
+cmd = ["cargo", "run", "--", "--help"]
+expect_exit = 0
+timeout_secs = 300
+stdout_contains = ["--color", "--progress", "--format"]

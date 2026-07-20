@@ -1,0 +1,68 @@
+.TH DELIVER 1 "July 2026" "deliver 0.1.0" "User Commands"
+.SH NAME
+deliver \- deterministic deliverable validator for agent workflows
+.SH SYNOPSIS
+.B deliver
+[\fB--spec\fR \fIPATH\fR]
+[\fB--json\fR \fIJSON\fR]
+[\fB--file\fR \fIPATTERN\fR...]
+[\fB--base\fR \fIDIR\fR]
+[\fB--format\fR \fItext|json\fR]
+[\fB--color\fR \fIauto|always|never\fR]
+[\fB--progress\fR \fIauto|always|never\fR]
+[\fB--strict\fR]
+.SH DESCRIPTION
+.B deliver
+validates concrete task outputs from a TOML or JSON spec. It can check file
+existence, size limits, required and forbidden regexes, command exit status,
+stdout and stderr content, and Git cleanliness.
+.SH OPTIONS
+.TP
+.B -s, --spec \fIPATH\fR
+Read a TOML or JSON validation spec from \fIPATH\fR.
+.TP
+.B --json \fIJSON\fR
+Read a JSON validation spec from the command line. This overrides
+\fB--spec\fR.
+.TP
+.B --file \fIPATTERN\fR...
+Run quick required-file checks. Simple \fB*\fR and \fB?\fR glob patterns are
+expanded recursively below \fB--base\fR.
+.TP
+.B -b, --base \fIDIR\fR
+Resolve relative file paths and command working directories from \fIDIR\fR.
+Defaults to the current directory.
+.TP
+.B -f, --format \fItext|json\fR
+Select text or JSON report output. Text is for people; JSON is for tools.
+.TP
+.B --color \fIauto|always|never\fR
+Control ANSI color in text output. The default, \fBauto\fR, enables color only
+when stdout is a terminal.
+.TP
+.B --progress \fIauto|always|never\fR
+Control the stderr progress spinner. The default, \fBauto\fR, shows progress
+for interactive text runs.
+.TP
+.B --strict
+Exit with status 1 when any validation check fails.
+.SH EXIT STATUS
+.TP
+.B 0
+Validation completed. Checks may have failed unless \fB--strict\fR was used.
+.TP
+.B 1
+At least one validation check failed and \fB--strict\fR was set.
+.TP
+.B 2
+The command could not read or parse its inputs, or no checks were provided.
+.SH EXAMPLES
+.TP
+.B deliver --spec deliver.toml --strict
+Run the project validation spec and fail the process on any failed check.
+.TP
+.B deliver --file README.md src/*.rs --color always
+Check files directly and force colored text output.
+.TP
+.B deliver --spec deliver.toml --format json
+Emit a stable JSON report for another tool.
