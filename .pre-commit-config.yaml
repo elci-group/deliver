@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: deliver-validate
+        name: Deliver validation
+        entry: deliver
+        args: ['--spec', 'deliver.toml', '--strict']
+        language: system
+        pass_filenames: false

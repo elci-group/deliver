@@ -16,13 +16,39 @@ required = true
 path = "README.md"
 required = true
 min_size_bytes = 1200
-require_regex = ["deliver --spec", "Output Modes", "Spec Reference"]
+require_regex = [
+  "deliver --spec",
+  "Output Modes",
+  "Spec Reference",
+  "deliver init",
+  "deliver validate",
+  "deliver completions",
+  "deliver schema",
+  "extends",
+  "--jobs",
+  "format sarif",
+  "format junit",
+]
 
 [[file]]
 path = "man/deliver.1"
 required = true
 min_size_bytes = 900
-require_regex = ["\\.TH DELIVER 1", "--color", "--progress"]
+require_regex = [
+  "\\.TH DELIVER 1",
+  "--color",
+  "--progress",
+  "\\.SH COMMANDS",
+  "--jobs",
+  "SARIF 2\\.1\\.0",
+  "JUnit XML",
+]
+
+[[file]]
+path = "BENCHMARKS.md"
+required = true
+min_size_bytes = 1200
+require_regex = ["Detailed Results", "deliver_vs_shell", "Reproducing"]
 
 [[command]]
 name = "cargo test"
@@ -36,6 +62,18 @@ name = "cargo build"
 cmd = ["cargo", "build"]
 expect_exit = 0
 timeout_secs = 300
+
+[[command]]
+name = "cargo clippy"
+cmd = ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]
+expect_exit = 0
+timeout_secs = 300
+
+[[command]]
+name = "cargo fmt --check"
+cmd = ["cargo", "fmt", "--", "--check"]
+expect_exit = 0
+timeout_secs = 60
 
 [[command]]
 name = "help lists output controls"

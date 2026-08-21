@@ -135,3 +135,157 @@ pub fn render_text(report: &Report, style: &TextStyle) {
         println!("{} {} {} {}", status, name, kind, message);
     }
 }
+
+/// Render a SARIF 2.1.0 log. Only failed checks become `results`, matching
+/// how SARIF-consuming tools (GitHub code scanning, etc.) treat entries as
+/// findings to annotate rather than a full pass/fail ledger.
+pub fn render_sarif(report: &Report) -> String {
+    let rule_ids: Vec<&str> = {
+        let mut kinds: Vec<&str> = report.checks.iter().map(|c| c.kind.as_str()).collect();
+        kinds.sort_unstable();
+        kinds.dedup();
+        kinds
+    };
+
+    let rules: Vec<String> = rule_ids
+        .iter()
+        .map(|kind| {
+            format!(
+                r#"{{"id":{},"name":{}}}"#,
+                json_string(kind),
+                json_string(&format!("{}-check", kind))
+            )
+        })
+        .collect();
+
+    let results: Vec<String> = report
+        .checks
+        .iter()
+        .filter(|check| !check.pass)
+        .map(|check| {
+            format!(
+                r#"{{"ruleId":{},"level":"error","message":{{"text":{}}}}}"#,
+                json_string(&check.kind),
+                json_string(&format!("{}: {}", check.name, check.message))
+            )
+        })
+        .collect();
+
+    format!(
+        r#"{{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json","version":"2.1.0","runs":[{{"tool":{{"driver":{{"name":"deliver","informationUri":"https://github.com/","version":{},"rules":[{}]}}}},"results":[{}]}}]}}"#,
+        json_string(env!("CARGO_PKG_VERSION")),
+        rules.join(","),
+        results.join(",")
+    )
+}
+
+/// Render a JUnit XML report. Every check becomes a `<testcase>`; failing
+/// checks additionally carry a `<failure>` child, per the de facto JUnit XML
+/// schema most CI dashboards consume.
+pub fn render_junit(report: &Report) -> String {
+    let failures = report.checks.iter().filter(|c| !c.pass).count();
+    let mut out = String::new();
+    out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    out.push_str(&format!(
+        "<testsuites>\n  <testsuite name=\"deliver\" tests=\"{}\" failures=\"{}\" time=\"{:.3}\">\n",
+        report.checks.len(),
+        failures,
+        report.duration_ms as f64 / 1000.0
+    ));
+    for check in &report.checks {
+        out.push_str(&format!(
+            "    <testcase classname=\"{}\" name=\"{}\">\n",
+            escape_xml(&check.kind),
+            escape_xml(&check.name)
+        ));
+        if !check.pass {
+            out.push_str(&format!(
+                "      <failure message=\"{}\">{}</failure>\n",
+                escape_xml(&check.message),
+                escape_xml(&check.message)
+            ));
+        }
+        out.push_str("    </testcase>\n");
+    }
+    out.push_str("  </testsuite>\n</testsuites>\n");
+    out
+}
+
+fn escape_xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn json_string(text: &str) -> String {
+    serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deliver::CheckResult;
+
+    fn sample_report(pass: bool) -> Report {
+        Report {
+            pass,
+            duration_ms: 42,
+            checks: vec![
+                CheckResult {
+                    name: "file: README.md".to_string(),
+                    pass: true,
+                    kind: "file".to_string(),
+                    message: "OK (10 bytes)".to_string(),
+                },
+                CheckResult {
+                    name: "cargo test".to_string(),
+                    pass,
+                    kind: "command".to_string(),
+                    message: if pass {
+                        "OK".to_string()
+                    } else {
+                        "exit code mismatch \"quoted\" & <weird>".to_string()
+                    },
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn sarif_only_includes_failures() {
+        let report = sample_report(false);
+        let sarif = render_sarif(&report);
+        let value: serde_json::Value = serde_json::from_str(&sarif).unwrap();
+        let results = value["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["ruleId"], "command");
+    }
+
+    #[test]
+    fn sarif_is_valid_json_when_all_pass() {
+        let report = sample_report(true);
+        let sarif = render_sarif(&report);
+        let value: serde_json::Value = serde_json::from_str(&sarif).unwrap();
+        assert!(value["runs"][0]["results"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn junit_escapes_special_characters_and_counts_failures() {
+        let report = sample_report(false);
+        let xml = render_junit(&report);
+        assert!(xml.contains("tests=\"2\" failures=\"1\""));
+        assert!(xml.contains("&quot;quoted&quot;"));
+        assert!(xml.contains("&lt;weird&gt;"));
+        assert!(xml.contains("<failure"));
+    }
+
+    #[test]
+    fn junit_omits_failure_element_when_all_pass() {
+        let report = sample_report(true);
+        let xml = render_junit(&report);
+        assert!(xml.contains("tests=\"2\" failures=\"0\""));
+        assert!(!xml.contains("<failure"));
+    }
+}

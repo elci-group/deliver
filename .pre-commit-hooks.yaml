@@ -1,0 +1,8 @@
+- id: deliver-validate
+  name: Deliver validation
+  description: Run deliver against deliver.toml and fail the commit if any check fails.
+  entry: deliver
+  args: ['--spec', 'deliver.toml', '--strict']
+  language: system
+  pass_filenames: false
+  types: [rust]

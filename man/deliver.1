@@ -1,4 +1,4 @@
-.TH DELIVER 1 "July 2026" "deliver 0.1.0" "User Commands"
+.TH DELIVER 1 "August 2026" "deliver 0.2.0" "User Commands"
 .SH NAME
 deliver \- deterministic deliverable validator for agent workflows
 .SH SYNOPSIS
@@ -7,15 +7,43 @@ deliver \- deterministic deliverable validator for agent workflows
 [\fB--json\fR \fIJSON\fR]
 [\fB--file\fR \fIPATTERN\fR...]
 [\fB--base\fR \fIDIR\fR]
-[\fB--format\fR \fItext|json\fR]
+[\fB--format\fR \fItext|json|sarif|junit\fR]
 [\fB--color\fR \fIauto|always|never\fR]
 [\fB--progress\fR \fIauto|always|never\fR]
 [\fB--strict\fR]
+[\fB--jobs\fR \fIN\fR]
+.br
+.B deliver
+\fICOMMAND\fR [\fIARGS\fR...]
 .SH DESCRIPTION
 .B deliver
 validates concrete task outputs from a TOML or JSON spec. It can check file
-existence, size limits, required and forbidden regexes, command exit status,
-stdout and stderr content, and Git cleanliness.
+existence, size limits, required and forbidden regexes, hashes, schemas,
+directory shape, command exit status, stdout and stderr content, and Git
+cleanliness.
+.SH COMMANDS
+.TP
+.B init [--output \fIPATH\fR]
+Write a starter spec file to \fIPATH\fR (default \fBdeliver.toml\fR). Fails
+if the file already exists.
+.TP
+.B validate \fIPATH\fR
+Parse the spec at \fIPATH\fR (TOML or JSON, by extension) and report a syntax
+error without running any checks.
+.TP
+.B completions \fISHELL\fR
+Print shell completion script source for \fBbash\fR, \fBzsh\fR, or
+\fBfish\fR to stdout.
+.TP
+.B schema
+Print the spec format as a JSON Schema (draft-07) document to stdout, for
+editor and agent tooling to validate or autocomplete a spec file.
+.SH SPEC COMPOSITION
+A spec file may set a top-level \fBextends\fR key naming a parent spec,
+resolved relative to the directory of the spec that declares it. Checks
+accumulate (parent checks run first); Git-cleanliness flags combine with
+\fBOR\fR, so a child spec can only add requirements on top of its parent.
+Circular \fBextends\fR chains are rejected with an error.
 .SH OPTIONS
 .TP
 .B -s, --spec \fIPATH\fR
@@ -33,8 +61,16 @@ expanded recursively below \fB--base\fR.
 Resolve relative file paths and command working directories from \fIDIR\fR.
 Defaults to the current directory.
 .TP
-.B -f, --format \fItext|json\fR
-Select text or JSON report output. Text is for people; JSON is for tools.
+.B -f, --format \fItext|json|sarif|junit\fR
+Select the report format. Text is for people; JSON is for generic tools;
+\fBsarif\fR emits SARIF 2.1.0 (failed checks only, for GitHub code scanning
+and similar); \fBjunit\fR emits JUnit XML (every check, for CI dashboards).
+.TP
+.B -j, --jobs \fIN\fR
+Run file, command, and directory checks across up to \fIN\fR worker threads;
+Git checks always run last and sequentially. Default \fB1\fR (sequential).
+\fB0\fR uses all available CPUs. Report order always matches spec order
+regardless of \fIN\fR.
 .TP
 .B --color \fIauto|always|never\fR
 Control ANSI color in text output. The default, \fBauto\fR, enables color only
@@ -66,3 +102,6 @@ Check files directly and force colored text output.
 .TP
 .B deliver --spec deliver.toml --format json
 Emit a stable JSON report for another tool.
+.TP
+.B deliver init && deliver validate deliver.toml
+Scaffold a spec and confirm it parses before running it.

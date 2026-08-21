@@ -37,7 +37,10 @@ pub fn validate_command(check: &CommandCheck, base: &Path) -> CheckResult {
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
-                message: format!("failed to spawn '{}': {}", program, error),
+                message: format!(
+                    "failed to spawn '{}': {}. Suggestion: check if the command exists and is executable.",
+                    program, error
+                ),
             }
         }
     };
@@ -50,7 +53,10 @@ pub fn validate_command(check: &CommandCheck, base: &Path) -> CheckResult {
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
-                message: format!("command timed out after {}s: {}", check.timeout_secs, error),
+                message: format!(
+                    "command timed out after {}s: {}. Suggestion: increase timeout_secs or optimize the command.",
+                    check.timeout_secs, error
+                ),
             }
         }
     };
@@ -92,7 +98,7 @@ fn check_command_result(
             pass: false,
             kind: "command".to_string(),
             message: format!(
-                "exit code {:?}, expected {} ({} ms)",
+                "exit code {:?}, expected {} ({} ms). Suggestion: fix the command or adjust expect_exit.",
                 result.status.code(),
                 check.expect_exit,
                 elapsed
@@ -107,7 +113,7 @@ fn check_command_result(
                 pass: false,
                 kind: "command".to_string(),
                 message: format!(
-                    "stdout missing expected: {}; update stdout_contains or fix the command output",
+                    "stdout missing expected: '{}'. Suggestion: update stdout_contains or fix the command output.",
                     expected
                 ),
             };
@@ -121,7 +127,7 @@ fn check_command_result(
                 pass: false,
                 kind: "command".to_string(),
                 message: format!(
-                    "stderr missing expected: {}; update stderr_contains or fix the command output",
+                    "stderr missing expected: '{}'. Suggestion: update stderr_contains or fix the command output.",
                     expected
                 ),
             };
