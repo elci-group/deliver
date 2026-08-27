@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Poka external generator adapter for lwoodz.
+# Runs `lwoodz init` to materialize lwoodz.toml, then emits poka's JSON
+# contract describing the generated file.
+set -euo pipefail
+
+# Consume the JSON context poka sends on stdin; lwoodz does not use it.
+cat >/dev/null
+
+# Initialize lwoodz in the current working directory if it has not already
+# been initialized. lwoodz init exits with an error when lwoodz.toml exists,
+# so we only run it when the file is absent.
+if [[ ! -f lwoodz.toml ]]; then
+    lwoodz init >/dev/null 2>&1
+fi
+
+# Emit the generated file list in poka's expected JSON format.
+if [[ -f lwoodz.toml ]]; then
+    # Escape the TOML contents for JSON string embedding.
+    contents=$(python3 - <<'PY'
+import json, sys
+try:
+    with open('lwoodz.toml', 'r', encoding='utf-8') as f:
+        print(json.dumps(f.read()))
+except Exception:
+    print('""')
+PY
+)
+    printf '{"files":[{"path":"lwoodz.toml","contents":%s}]}' "$contents"
+else
+    echo '{"files":[]}'
+fi

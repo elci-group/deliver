@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Generic Poka external generator adapter for tools that write a dotfile
+# directly to disk instead of emitting poka's JSON contract.
+#
+# Usage: poka-generate-file '<shell-command>' <generated-path> [<generated-path> ...]
+#
+# The command is executed in the current working directory. Any JSON context
+# poka sends on stdin is consumed and discarded. The contents of each listed
+# file (if it exists after the command runs) are returned in poka's JSON
+# format.
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    echo "Usage: $0 '<command>' <file> [<file> ...]" >&2
+    exit 1
+fi
+
+# Consume poka's JSON context; most elci-group tools do not read stdin.
+cat >/dev/null
+
+command="$1"
+shift
+# Run the tool command. Suppress its stdout so only the JSON contract ends up
+# on stdout. Failures are intentionally propagated so poka reports a clear
+# generator error.
+eval "$command" >/dev/null
+
+python3 - "$@" <<'PY'
+import json, sys, os
+
+files = []
+for path in sys.argv[1:]:
+    if os.path.isfile(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            files.append({"path": path, "contents": f.read()})
+
+print(json.dumps({"files": files}))
+PY

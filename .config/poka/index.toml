@@ -1,0 +1,107 @@
+# Poka tool index.
+#
+# Each [[tool]] entry declares a tool name and the shell command poka invokes
+# to generate dotfiles for that tool. The command receives a JSON context on
+# stdin and must emit a JSON file list on stdout.
+#
+# Input context (stdin):
+#   {"project_name": "my-project", "rules": ["security", "testing"]}
+#
+# Expected output (stdout):
+#   {"files": [{"path": ".claude/CLAUDE.md", "contents": "# ..."}]}
+#
+# NOTE: the elci-group entries below invoke each tool's own `init`/`create`
+# subcommand, discovered via `--help`. They write their dotfile(s) directly
+# into the working directory rather than emitting poka's JSON contract, so
+# they serve as the canonical catalogue of how to generate each tool's
+# dotfiles. Only uncomment-and-wrap in a JSON adapter if you want poka to
+# drive them as live generators.
+#
+# Uncomment an entry to route that tool through an external generator. When a
+# tool is not listed here, poka falls back to its built-in generator.
+
+[index]
+version = 1
+
+# --- elci-group tools: init/create commands that generate config dotfiles ---
+
+# Writes deckhand.toml (build-artifact hygiene config).
+[[tool]]
+name = "deckhand"
+command = "deckhand init --force --config deckhand.toml"
+
+# Generates an example goglz.yaml daemon configuration.
+[[tool]]
+name = "goglz"
+command = "goglz init-config"
+
+# Initializes configuration (daemon config file).
+[[tool]]
+name = "dreamseq"
+command = "dreamseq init"
+
+# Auto-generates kaptaind.toml and .kaptainignore from detected project type.
+# Wrapped in a JSON adapter so poka can drive it as a live generator.
+[[tool]]
+name = "kaptaind"
+command = "poka-generate-file 'kaptaind-cli init' kaptaind.toml .kaptainignore"
+
+# init subcommand writes lwoodz.toml in the current repository.
+# Wrapped in a JSON adapter so poka can drive it as a live generator.
+[[tool]]
+name = "lwoodz"
+command = "poka-generate-lwoodz"
+
+# Scaffolds the .brandi/ genome directory.
+# [[tool]]
+# name = "brandi"
+# command = "brandi init --path ."
+
+# Initializes the ~/.isopod directory and default controls (dir scaffold).
+# [[tool]]
+# name = "isopod"
+# command = "isopod init --base ."
+
+# Initializes a .skillastic workspace directory.
+# [[tool]]
+# name = "skillastic"
+# command = "skillastic init --app-name myapp"
+
+# init [--force] writes the traci config file.
+# Wrapped in a JSON adapter so poka can drive it as a live generator.
+[[tool]]
+name = "traci"
+command = "poka-generate-file 'traci init --force' traci.toml"
+
+# Creates (if needed) and prints the voxd daemon config.toml.
+[[tool]]
+name = "voxd"
+command = "voxd-cli config init --config config.toml"
+
+# policy --init writes default pressure-policy config.
+[[tool]]
+name = "pv"
+command = "pv policy --init"
+
+# Writes poka.toml itself (bootstraps poka in a new project).
+[[tool]]
+name = "poka"
+command = "poka init --force"
+
+# --- built-in generators (external overrides, commented) ---
+
+# [[tool]]
+# name = "claude"
+# command = "poka-generate-claude"
+
+# [[tool]]
+# name = "codex"
+# command = "poka-generate-codex"
+
+# [[tool]]
+# name = "github"
+# command = "poka-generate-github"
+
+# [[tool]]
+# name = "python"
+# command = "poka-generate-python"
