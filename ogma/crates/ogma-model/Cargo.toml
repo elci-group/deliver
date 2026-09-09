@@ -1,9 +1,0 @@
-[package]
-name = "ogma-model"
-description = "Canonical domain types for the Ogma deterministic multilingual conformance engine"
-edition.workspace = true
-license.workspace = true
-version.workspace = true
-
-[dependencies]
-serde.workspace = true
