@@ -1,0 +1,16 @@
+[package]
+name = "ogma-core"
+description = "Audit pipeline orchestration for Ogma"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ogma-model.workspace = true
+ogma-discovery.workspace = true
+ogma-parser.workspace = true
+ogma-strings.workspace = true
+ogma-conformance.workspace = true
+ogma-locale.workspace = true
+serde.workspace = true
+serde_json.workspace = true

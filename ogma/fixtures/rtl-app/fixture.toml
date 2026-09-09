@@ -1,0 +1,25 @@
+# Arabic is fully translated but the app has no direction handling: ar's
+# text_direction check is UNKNOWN. allow_unknown = true admits it, and
+# allow_fallback = true admits the ar -> en chain tail. PASS.
+# The harness additionally audits this same tree under the DEFAULT policy and
+# asserts overall FAIL with ar non-native (the secondary RTL check).
+description = "RTL locale without bidi evidence: UNKNOWN text direction admitted by allow_unknown; PASS"
+
+[policy]
+allow_fallback = true
+allow_unknown = true
+
+[expect]
+baseline = "en"
+baseline_confidence = "LIKELY"
+locales = ["ar", "en"]
+overall = "PASS"
+
+[expect.native]
+ar = true
+en = true
+
+[expect.violations]
+global = []
+ar = []
+en = []

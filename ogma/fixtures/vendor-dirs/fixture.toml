@@ -1,0 +1,24 @@
+# JS app with a vendored library under vendor/. The vendor/ path segment
+# classifies vendor/foreign/lib.js as Vendor, so its hard-coded string never
+# enters the linguistic surface: the global OGMA-I18N-001 aggregate
+# references only src/app.js. Overall PASS (hard-coded strings are
+# Warnings). Baseline undetected (Latin-only, no hints), working baseline
+# en. fixture.toml itself is scanned as the locale-less baseline catalogue;
+# self-comparison findings are filtered by the engine.
+description = "Vendored library strings excluded from extraction; only src/app.js in OGMA-I18N-001; PASS"
+
+[expect]
+baseline = "none"
+baseline_confidence = "UNKNOWN"
+locales = ["en"]
+overall = "PASS"
+
+[expect.native]
+en = true
+
+[expect.violations]
+global = ["OGMA-I18N-001"]
+en = []
+
+[expect.violation_files]
+"OGMA-I18N-001" = ["src/app.js"]

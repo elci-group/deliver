@@ -1,0 +1,31 @@
+# Rust CLI with hard-coded user-facing strings (two println!, one
+# set_text) plus a panic! literal. The panic! argument is DeveloperFacing and
+# must NOT surface in the OGMA-I18N-001 aggregate (checked via absent_text).
+# The hard-coded strings are Warnings: they do not fail the audit by
+# themselves. de is complete; allow_fallback = true permits de -> en.
+# Baseline detection: only Latin-script strings and no config hints, so the
+# script guess returns nothing and en/de resource naming ties at Weak (10 vs
+# 10) -> baseline language None (the working baseline falls back to en).
+description = "Rust CLI with hard-coded strings and panic!; panic text excluded from user-facing findings; PASS"
+
+[policy]
+allow_fallback = true
+
+[expect]
+baseline = "none"
+baseline_confidence = "UNKNOWN"
+locales = ["de", "en"]
+overall = "PASS"
+absent_text = ["internal invariant"]
+
+[expect.native]
+de = true
+en = true
+
+[expect.violations]
+global = ["OGMA-I18N-001"]
+de = []
+en = []
+
+[expect.violation_files]
+"OGMA-I18N-001" = ["src/main.rs"]

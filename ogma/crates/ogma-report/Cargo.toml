@@ -1,0 +1,10 @@
+[package]
+name = "ogma-report"
+description = "Deterministic report renderers for Ogma"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ogma-model.workspace = true
+serde_json.workspace = true

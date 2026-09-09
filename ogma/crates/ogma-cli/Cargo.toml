@@ -1,0 +1,19 @@
+[package]
+name = "ogma-cli"
+description = "Command-line interface for the Ogma deterministic multilingual conformance engine"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "ogma"
+path = "src/main.rs"
+
+[dependencies]
+ogma-model.workspace = true
+ogma-core.workspace = true
+ogma-policy.workspace = true
+ogma-report.workspace = true
+ogma-integrations.workspace = true
+clap.workspace = true
+serde_json.workspace = true

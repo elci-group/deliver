@@ -1,0 +1,12 @@
+[package]
+name = "ogma-parser"
+description = "Framework adapters and source analysis for Ogma"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ogma-model.workspace = true
+ogma-discovery.workspace = true
+ogma-locale.workspace = true
+serde.workspace = true

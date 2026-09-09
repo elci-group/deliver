@@ -1,0 +1,6 @@
+{
+  "welcome": "Welcome, {name}!",
+  "menu.settings": "Settings",
+  "menu.logout": "Log out",
+  "menu.help": "Help"
+}

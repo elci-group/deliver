@@ -1,0 +1,24 @@
+# Fully translated i18next/react app. Under the default policy fr would fail
+# with OGMA-I18N-011 (its fallback chain fr -> en crosses languages), so this
+# fixture declares allow_fallback = true: both locales are native and the
+# overall status is PASS. The baseline is detected as en (fallbackLng hint +
+# resource naming), confidence LIKELY (no Strong evidence).
+description = "Complete i18next app: en baseline and fully translated fr, PASS under allow_fallback"
+
+[policy]
+allow_fallback = true
+
+[expect]
+baseline = "en"
+baseline_confidence = "LIKELY"
+locales = ["en", "fr"]
+overall = "PASS"
+
+[expect.native]
+en = true
+fr = true
+
+[expect.violations]
+global = []
+en = []
+fr = []

@@ -1,0 +1,32 @@
+# Django app: settings.py declares LANGUAGE_CODE = "en-us" (Strong default
+# evidence -> baseline en PROVEN) and mentions django, so the framework is
+# detected. templates/base.html hard-codes <title>My Site</title> (global
+# OGMA-I18N-001) alongside a {% trans "Welcome" %}; app.py uses gettext _().
+# The LANGUAGE_CODE hint adds en-US to the supported locale set (no en-US
+# catalogue, so it shares en's and self-compares with 006 warnings). fr is
+# complete; allow_fallback admits fr -> en. Overall PASS.
+description = "Django app with LANGUAGE_CODE en-us, template trans tag and hard-coded title; PASS"
+
+[policy]
+allow_fallback = true
+
+[expect]
+baseline = "en"
+baseline_confidence = "PROVEN"
+locales = ["en", "en-US", "fr"]
+overall = "PASS"
+frameworks = ["django", "generic"]
+
+[expect.native]
+en = true
+en-US = true
+fr = true
+
+[expect.violations]
+global = ["OGMA-I18N-001"]
+en = []
+en-US = []
+fr = []
+
+[expect.violation_files]
+"OGMA-I18N-001" = ["templates/base.html"]

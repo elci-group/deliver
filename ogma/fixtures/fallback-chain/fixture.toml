@@ -1,0 +1,27 @@
+# en + fr + fr-CA, all fully translated. fr-CA's fallback chain is
+# fr-CA -> fr (regional, acceptable) followed by fr-CA -> en (primary
+# language): the engine always terminates the chain at the baseline when it
+# is another language, so even a fully covered regional locale reports a
+# cross-language dependency. allow_fallback = true therefore permits the
+# chain and all three locales are native: overall PASS.
+description = "Regional fallback fr-CA -> fr stays in-language, but the engine still chains fr-CA -> en; allowed here, all native"
+
+[policy]
+allow_fallback = true
+
+[expect]
+baseline = "en"
+baseline_confidence = "LIKELY"
+locales = ["en", "fr", "fr-CA"]
+overall = "PASS"
+
+[expect.native]
+en = true
+fr = true
+fr-CA = true
+
+[expect.violations]
+global = []
+en = []
+fr = []
+fr-CA = []

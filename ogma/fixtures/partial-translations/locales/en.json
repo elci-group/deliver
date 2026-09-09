@@ -1,0 +1,9 @@
+{
+  "welcome": "Welcome, {name}!",
+  "menu.settings": "Settings",
+  "menu.logout": "Log out",
+  "menu.help": "Help",
+  "menu.profile": "Profile",
+  "action.save": "Save changes",
+  "action.delete": "Delete {name}"
+}

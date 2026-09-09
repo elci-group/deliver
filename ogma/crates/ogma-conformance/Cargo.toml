@@ -1,0 +1,11 @@
+[package]
+name = "ogma-conformance"
+description = "Deterministic conformance evaluation for Ogma"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ogma-model.workspace = true
+ogma-locale.workspace = true
+ogma-strings.workspace = true

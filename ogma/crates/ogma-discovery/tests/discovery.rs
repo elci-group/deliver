@@ -1,0 +1,450 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use ogma_discovery::{
+    detect_language, read_file_limited, scan, FileClass, ProgLanguage,
+    MAX_SNIFF_BYTES,
+};
+
+struct Fixture(PathBuf);
+
+impl Fixture {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "ogma-discovery-test-{}-{}",
+            name,
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        Fixture(dir)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn write(&self, rel: &str, content: &str) -> PathBuf {
+        let path = self.0.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn get(&self, rel: &str) -> ogma_discovery::IndexedFile {
+        let index = scan(self.path()).unwrap();
+        index
+            .files
+            .into_iter()
+            .find(|f| f.path == PathBuf::from(rel))
+            .unwrap_or_else(|| panic!("file {rel} not found in index"))
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn classifies_source_with_language() {
+    let fx = Fixture::new("source");
+    fx.write("src/main.rs", "fn main() {}\n");
+    let f = fx.get("src/main.rs");
+    assert_eq!(f.class, FileClass::Source);
+    assert_eq!(f.language, ProgLanguage::Rust);
+}
+
+#[test]
+fn classifies_test_dirs_and_test_file_names() {
+    let fx = Fixture::new("testclass");
+    fx.write("tests/integration.rs", "#[test]\nfn t() {}\n");
+    fx.write("src/foo_test.go", "package foo\n");
+    fx.write("py/test_util.py", "# helper\n");
+    fx.write("js/util.spec.ts", "export {}\n");
+    fx.write("app.test.js", "module.exports = {}\n");
+    assert_eq!(fx.get("tests/integration.rs").class, FileClass::Test);
+    assert_eq!(fx.get("src/foo_test.go").class, FileClass::Test);
+    assert_eq!(fx.get("py/test_util.py").class, FileClass::Test);
+    assert_eq!(fx.get("js/util.spec.ts").class, FileClass::Test);
+    assert_eq!(fx.get("app.test.js").class, FileClass::Test);
+}
+
+#[test]
+fn classifies_documentation() {
+    let fx = Fixture::new("docs");
+    fx.write("README.md", "# readme\n");
+    fx.write("docs/guide.rst", "guide\n");
+    fx.write("LICENSE", "mit\n");
+    fx.write("CHANGELOG.md", "changes\n");
+    assert_eq!(fx.get("README.md").class, FileClass::Documentation);
+    assert_eq!(fx.get("docs/guide.rst").class, FileClass::Documentation);
+    assert_eq!(fx.get("LICENSE").class, FileClass::Documentation);
+    assert_eq!(fx.get("CHANGELOG.md").class, FileClass::Documentation);
+}
+
+#[test]
+fn classifies_assets() {
+    let fx = Fixture::new("assets");
+    fx.write("img/logo.png", "fakepng");
+    fx.write("fonts/app.woff2", "fakefont");
+    fx.write("resources/logo.svg", "<svg/>");
+    assert_eq!(fx.get("img/logo.png").class, FileClass::Asset);
+    assert_eq!(fx.get("fonts/app.woff2").class, FileClass::Asset);
+    // Asset wins over the `resources` Resource segment.
+    assert_eq!(fx.get("resources/logo.svg").class, FileClass::Asset);
+}
+
+#[test]
+fn classifies_resource_catalogues() {
+    let fx = Fixture::new("resources");
+    fx.write("locales/en.json", "{}");
+    fx.write("locales/fr.yaml", "{}");
+    fx.write("i18n/messages.po", "msgid \"\"\n");
+    fx.write("app.arb", "{}");
+    fx.write("src/en-US.lproj/Localizable.strings", "\"a\" = \"b\";\n");
+    for rel in [
+        "locales/en.json",
+        "locales/fr.yaml",
+        "i18n/messages.po",
+        "app.arb",
+        "src/en-US.lproj/Localizable.strings",
+    ] {
+        assert_eq!(fx.get(rel).class, FileClass::Resource, "{rel}");
+    }
+    // Documentation wins over the `locales` Resource segment.
+    fx.write("locales/readme.md", "# readme\n");
+    assert_eq!(fx.get("locales/readme.md").class, FileClass::Documentation);
+}
+
+#[test]
+fn classifies_config() {
+    let fx = Fixture::new("config");
+    fx.write("app.lock", "");
+    fx.write(".babelrc", "{}");
+    fx.write(".config/settings", "x=1\n");
+    fx.write("conf/app.conf", "x=1\n");
+    assert_eq!(fx.get("app.lock").class, FileClass::Config);
+    assert_eq!(fx.get(".babelrc").class, FileClass::Config);
+    assert_eq!(fx.get(".config/settings").class, FileClass::Config);
+    assert_eq!(fx.get("conf/app.conf").class, FileClass::Config);
+}
+
+#[test]
+fn json_and_toml_are_resource_before_config() {
+    let fx = Fixture::new("resourcefirst");
+    fx.write("package.json", "{}");
+    fx.write("Cargo.toml", "[package]\nname=\"x\"\n");
+    assert_eq!(fx.get("package.json").class, FileClass::Resource);
+    assert_eq!(fx.get("Cargo.toml").class, FileClass::Resource);
+}
+
+#[test]
+fn classifies_generated_by_name_and_sniff() {
+    let fx = Fixture::new("generated");
+    fx.write("api.pb.go", "package api\n");
+    fx.write("gen/route.generated.rs", "pub fn x() {}\n");
+    fx.write("build/schema.pb.h", "// hdr\n");
+    fx.write("src/zz.rs", "// Code generated by tool. DO NOT EDIT.\npub fn z() {}\n");
+    fx.write("src/autogen.rs", "  // <auto-generated>\nfn a() {}\n");
+    fx.write("src/plain.rs", "fn p() {}\n");
+    assert_eq!(fx.get("api.pb.go").class, FileClass::Generated);
+    assert_eq!(fx.get("gen/route.generated.rs").class, FileClass::Generated);
+    assert_eq!(fx.get("build/schema.pb.h").class, FileClass::Generated);
+    assert_eq!(fx.get("src/zz.rs").class, FileClass::Generated);
+    assert_eq!(fx.get("src/autogen.rs").class, FileClass::Generated);
+    assert_eq!(fx.get("src/plain.rs").class, FileClass::Source);
+}
+
+#[test]
+fn classifies_vendor_dirs() {
+    let fx = Fixture::new("vendor");
+    fx.write("vendor/lib/foo.c", "int x;\n");
+    fx.write("third_party/dep/dep.c", "int y;\n");
+    fx.write("external/lib/lib.cpp", "int z;\n");
+    assert_eq!(fx.get("vendor/lib/foo.c").class, FileClass::Vendor);
+    assert_eq!(fx.get("third_party/dep/dep.c").class, FileClass::Vendor);
+    assert_eq!(fx.get("external/lib/lib.cpp").class, FileClass::Vendor);
+}
+
+#[test]
+fn unknown_leftovers_are_ignore() {
+    let fx = Fixture::new("ignore");
+    fx.write("data/blob.bin", "\x00\x01");
+    fx.write("notes", "hello");
+    assert_eq!(fx.get("data/blob.bin").class, FileClass::Ignore);
+    assert_eq!(fx.get("notes").class, FileClass::Ignore);
+}
+
+#[test]
+fn skips_vcs_and_dependency_dirs() {
+    let fx = Fixture::new("skipdirs");
+    fx.write("node_modules/dep/index.js", "module.exports = {}\n");
+    fx.write("target/debug/out.rs", "fn o() {}\n");
+    fx.write(".git/config", "[core]\n");
+    fx.write("src/main.rs", "fn main() {}\n");
+    let index = scan(fx.path()).unwrap();
+    let paths: Vec<_> = index.files.iter().map(|f| f.path.to_string_lossy().into_owned()).collect();
+    assert!(!paths.iter().any(|p| p.starts_with("node_modules/")), "{paths:?}");
+    assert!(!paths.iter().any(|p| p.starts_with("target/")), "{paths:?}");
+    assert!(!paths.iter().any(|p| p.starts_with(".git/")), "{paths:?}");
+    assert!(paths.iter().any(|p| p == "src/main.rs"), "{paths:?}");
+}
+
+#[test]
+fn gitignore_prunes_files_and_dirs() {
+    let fx = Fixture::new("gitignore");
+    fx.write(
+        ".gitignore",
+        "# comment\n\nbuild/**\n*.log\n/root_only.txt\ntmp_dir/\n",
+    );
+    fx.write("src/main.rs", "fn main() {}\n");
+    fx.write("debug.log", "x");
+    fx.write("nested/deep.log", "x");
+    fx.write("root_only.txt", "x");
+    fx.write("sub/root_only.txt", "x");
+    fx.write("build/out/a.rs", "fn a() {}\n");
+    fx.write("tmp_dir/b.rs", "fn b() {}\n");
+    fx.write("keep.txt", "x");
+    let index = scan(fx.path()).unwrap();
+    let paths: Vec<_> = index.files.iter().map(|f| f.path.to_string_lossy().into_owned()).collect();
+    assert!(!paths.contains(&"debug.log".to_string()), "{paths:?}");
+    assert!(!paths.contains(&"nested/deep.log".to_string()), "{paths:?}");
+    assert!(!paths.contains(&"root_only.txt".to_string()), "{paths:?}");
+    assert!(paths.contains(&"sub/root_only.txt".to_string()), "{paths:?}");
+    assert!(!paths.iter().any(|p| p.starts_with("build/")), "{paths:?}");
+    assert!(!paths.iter().any(|p| p.starts_with("tmp_dir/")), "{paths:?}");
+    assert!(paths.contains(&"keep.txt".to_string()), "{paths:?}");
+    assert!(paths.contains(&"src/main.rs".to_string()), "{paths:?}");
+}
+
+#[test]
+fn git_info_exclude_is_applied() {
+    let fx = Fixture::new("exclude");
+    fx.write(".git/info/exclude", "secret.txt\n");
+    fx.write("secret.txt", "s");
+    fx.write("public.txt", "p");
+    let index = scan(fx.path()).unwrap();
+    let paths: Vec<_> = index.files.iter().map(|f| f.path.to_string_lossy().into_owned()).collect();
+    assert!(!paths.contains(&"secret.txt".to_string()), "{paths:?}");
+    assert!(paths.contains(&"public.txt".to_string()), "{paths:?}");
+}
+
+#[test]
+fn scan_is_deterministic_across_runs() {
+    let fx = Fixture::new("determinism");
+    fx.write("src/b.rs", "fn b() {}\n");
+    fx.write("src/a.rs", "fn a() {}\n");
+    fx.write("docs/z.md", "z\n");
+    fx.write("Cargo.toml", "[package]\nname=\"x\"\n");
+    fx.write("pkg/y.json", "{}");
+    let i1 = scan(fx.path()).unwrap();
+    let i2 = scan(fx.path()).unwrap();
+    assert_eq!(i1.files, i2.files);
+    let mut sorted = i1.files.clone();
+    sorted.sort_by(|a, b| a.path.cmp(&b.path));
+    assert_eq!(i1.files, sorted, "files must be sorted by path");
+}
+
+#[test]
+fn by_class_and_with_language_filters() {
+    let fx = Fixture::new("filters");
+    fx.write("src/a.rs", "fn a() {}\n");
+    fx.write("src/b.py", "print(1)\n");
+    fx.write("docs/readme.md", "r\n");
+    let index = scan(fx.path()).unwrap();
+    let src = index.by_class(FileClass::Source);
+    assert_eq!(src.len(), 2);
+    let py = index.with_language(ProgLanguage::Python);
+    assert_eq!(py.len(), 1);
+    assert_eq!(py[0].path, PathBuf::from("src/b.py"));
+    let docs = index.by_class(FileClass::Documentation);
+    assert_eq!(docs.len(), 1);
+}
+
+#[test]
+fn manifests_found_at_any_depth() {
+    let fx = Fixture::new("manifests");
+    fx.write("package.json", "{}");
+    fx.write("sub/go.mod", "module x\n");
+    fx.write("deep/nested/app.csproj", "<xml/>");
+    fx.write("deep/nested/solution.sln", "");
+    fx.write("Gemfile", "source\n");
+    fx.write("src/main.rs", "fn main() {}\n");
+    let index = scan(fx.path()).unwrap();
+    let names: Vec<String> = index
+        .manifests()
+        .iter()
+        .map(|f| f.path.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "Gemfile",
+            "deep/nested/app.csproj",
+            "deep/nested/solution.sln",
+            "package.json",
+            "sub/go.mod",
+        ]
+    );
+}
+
+#[test]
+fn detect_language_by_extension() {
+    let cases = [
+        ("a.rs", ProgLanguage::Rust),
+        ("a.jsx", ProgLanguage::JavaScript),
+        ("a.mjs", ProgLanguage::JavaScript),
+        ("a.tsx", ProgLanguage::TypeScript),
+        ("a.mts", ProgLanguage::TypeScript),
+        ("a.py", ProgLanguage::Python),
+        ("a.m", ProgLanguage::ObjectiveC),
+        ("a.mm", ProgLanguage::ObjectiveC),
+        ("a.h", ProgLanguage::C),
+        ("a.cpp", ProgLanguage::Cpp),
+        ("a.cs", ProgLanguage::CSharp),
+        ("a.go", ProgLanguage::Go),
+        ("a.sh", ProgLanguage::Shell),
+        ("a.vue", ProgLanguage::Template),
+        ("a.hbs", ProgLanguage::Template),
+        ("a.json", ProgLanguage::Config),
+        ("a.yaml", ProgLanguage::Config),
+        ("a.toml", ProgLanguage::Config),
+        ("a.unknownext", ProgLanguage::Unknown),
+    ];
+    for (name, expected) in cases {
+        assert_eq!(detect_language(Path::new(name), None), expected, "{name}");
+    }
+}
+
+#[test]
+fn detect_language_by_shebang() {
+    assert_eq!(
+        detect_language(Path::new("script"), Some("#!/usr/bin/env python3")),
+        ProgLanguage::Python
+    );
+    assert_eq!(
+        detect_language(Path::new("script"), Some("#!/bin/bash")),
+        ProgLanguage::Shell
+    );
+    assert_eq!(
+        detect_language(Path::new("script"), Some("#!/usr/bin/env node")),
+        ProgLanguage::JavaScript
+    );
+    assert_eq!(
+        detect_language(Path::new("script"), Some("#!/usr/bin/env zsh")),
+        ProgLanguage::Shell
+    );
+    assert_eq!(
+        detect_language(Path::new("script"), Some("#!/bin/sh")),
+        ProgLanguage::Shell
+    );
+    assert_eq!(
+        detect_language(Path::new("script"), Some("not a shebang")),
+        ProgLanguage::Unknown
+    );
+}
+
+#[test]
+fn extensionless_shebang_scripts_are_ignore_class() {
+    let fx = Fixture::new("shebang");
+    fx.write("tool", "#!/usr/bin/env python3\nprint(1)\n");
+    fx.write("deploy", "#!/bin/bash\necho hi\n");
+    // Classification is extension-driven; unknown leftovers are Ignore even
+    // with a shebang. The shebang only refines `language` on Source files.
+    assert_eq!(fx.get("tool").class, FileClass::Ignore);
+    assert_eq!(fx.get("deploy").class, FileClass::Ignore);
+    // A `.sh` source file with a matching shebang still reports Shell.
+    fx.write("run.sh", "#!/bin/bash\necho hi\n");
+    let f = fx.get("run.sh");
+    assert_eq!(f.class, FileClass::Source);
+    assert_eq!(f.language, ProgLanguage::Shell);
+}
+
+#[test]
+fn hash_is_stable_and_content_dependent() {
+    let fx = Fixture::new("hash");
+    fx.write("a.txt", "same content");
+    fx.write("b.txt", "same content");
+    fx.write("empty.txt", "");
+    fx.write("c.txt", "different");
+    let fa = fx.get("a.txt");
+    let fb = fx.get("b.txt");
+    let fe = fx.get("empty.txt");
+    let fc = fx.get("c.txt");
+    assert_eq!(fa.hash, fb.hash);
+    assert_ne!(fa.hash, fc.hash);
+    // FNV-1a offset basis is the hash of the empty input.
+    assert_eq!(fe.hash, 0xcbf2_9ce4_8422_2325);
+    assert_eq!(fa.size, 12);
+}
+
+#[test]
+fn unreadable_files_are_skipped() {
+    let fx = Fixture::new("unreadable");
+    let path = fx.write("secret.txt", "x");
+    let mut perms = fs::metadata(&path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o000);
+        fs::set_permissions(&path, perms).unwrap();
+    }
+    let index = scan(fx.path()).unwrap();
+    #[cfg(unix)]
+    {
+        assert!(!index.files.iter().any(|f| f.path == PathBuf::from("secret.txt")));
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+}
+
+#[test]
+fn scan_errors_on_missing_or_non_directory_root() {
+    let fx = Fixture::new("badroot");
+    assert!(scan(&fx.0.join("nope")).is_err());
+    let file = fx.write("file.txt", "x");
+    let err = scan(&file).unwrap_err();
+    assert!(err.0.contains("not a directory"));
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinks_are_not_followed_or_indexed() {
+    use std::os::unix::fs::symlink;
+    let fx = Fixture::new("symlinks");
+    fx.write("real/thing.rs", "fn t() {}\n");
+    symlink("real/thing.rs", fx.path().join("alias.rs")).unwrap();
+    symlink("real", fx.path().join("linkdir")).unwrap();
+    let index = scan(fx.path()).unwrap();
+    let paths: Vec<_> = index.files.iter().map(|f| f.path.to_string_lossy().into_owned()).collect();
+    assert_eq!(paths, vec!["real/thing.rs"]);
+}
+
+#[test]
+fn read_file_limited_bounds_content() {
+    let fx = Fixture::new("limited");
+    let small = fx.write("small.txt", "abc");
+    assert_eq!(read_file_limited(&small, 10).unwrap(), "abc");
+    let big_content = "x".repeat(MAX_SNIFF_BYTES + 100);
+    let big = fx.write("big.txt", &big_content);
+    let limited = read_file_limited(&big, MAX_SNIFF_BYTES).unwrap();
+    assert_eq!(limited.len(), MAX_SNIFF_BYTES);
+    assert!(limited.chars().all(|c| c == 'x'));
+}
+
+#[test]
+fn scans_produce_identical_serialization() {
+    let fx = Fixture::new("serde");
+    fx.write("src/main.rs", "fn main() {}\n");
+    fx.write("locales/en.json", "{}");
+    fx.write("README.md", "r\n");
+    let i1 = scan(fx.path()).unwrap();
+    let i2 = scan(fx.path()).unwrap();
+    // serde_json is intentionally not a dependency; the derived `Serialize`
+    // impl feeds on field order, so identical `Debug` output plus identical
+    // `files` vectors demonstrates byte-identical serialisation.
+    assert_eq!(format!("{i1:?}"), format!("{i2:?}"));
+    assert_eq!(i1.files, i2.files);
+}

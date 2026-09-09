@@ -1,0 +1,19 @@
+# fr.json is a byte-identical copy of en.json: every key reports
+# OGMA-I18N-006 (untranslated value, a Warning), and under the default policy
+# fr -> en cross-language fallback adds OGMA-I18N-011 (Error). Coverage is a
+# deceptive 100%, but fr is not natively supported: overall FAIL.
+description = "fr catalogue is a byte-identical copy of en: untranslated values everywhere plus illegal fallback; FAIL"
+
+[expect]
+baseline = "en"
+baseline_confidence = "LIKELY"
+locales = ["en", "fr"]
+overall = "FAIL"
+
+[expect.native]
+en = true
+
+[expect.violations]
+global = []
+en = []
+fr = ["OGMA-I18N-006", "OGMA-I18N-011"]
