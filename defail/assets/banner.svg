@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 280" role="img" aria-label="DEFAIL: Deterministic Embedded Failure Addressing Inference Logic">
+  <!-- Horizontal lockup: the DEFAIL mark plus wordmark and full expansion. -->
+  <rect x="4" y="4" width="1112" height="272" rx="40" fill="#F8FAFC"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(64,60) scale(0.39) translate(-8,-52)">
+    <path d="M40 256 H150" stroke="#0F172A" stroke-width="28"/>
+    <path d="M150 256 V316 H214 V256" stroke="#D97706" stroke-width="28"/>
+    <path d="M214 256 H304" stroke="#0F172A" stroke-width="28"/>
+    <path d="M348 212 L392 256 L348 300 L304 256 Z" stroke="#0F172A" stroke-width="24"/>
+    <path d="M392 256 H436" stroke="#0F172A" stroke-width="28"/>
+    <path d="M436 214 L490 256 L436 298" stroke="#0F172A" stroke-width="28"/>
+    <path d="M348 300 V368" stroke="#64748B" stroke-width="24"/>
+    <circle cx="348" cy="398" r="18" fill="#64748B" stroke="none"/>
+  </g>
+  <text x="280" y="150" font-family="ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-weight="700" font-size="110" fill="#0F172A" textLength="480" lengthAdjust="spacing">DEFAIL</text>
+  <text x="280" y="200" font-family="ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="23" fill="#64748B" textLength="790" lengthAdjust="spacing">DETERMINISTIC EMBEDDED FAILURE ADDRESSING INFERENCE LOGIC</text>
+</svg>

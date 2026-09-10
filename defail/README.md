@@ -1,5 +1,7 @@
 # DEFAIL
 
+<img align="right" width="148" src="assets/logo.svg" alt="DEFAIL logo: a signal line dips through an amber failure pulse, is resolved by a decision diamond, and resumes as an arrow; the slate stub descending from the diamond to a dot marks deterministic escalation" />
+
 **Deterministic Embedded Failure Addressing Inference Logic.**
 
 DEFAIL is an inference/control layer that makes failures deterministic,
