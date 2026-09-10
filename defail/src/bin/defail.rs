@@ -32,8 +32,8 @@ FLAGS:
                      with `kb show`, print the bank as defail-kb/2 JSON
   --save-kb <PATH>   persist the knowledge learned by the scenarios; PATH
                      must be non-empty and stay inside the current directory
-                     (no `..` above it); path creation uses bank, with
-                     mkdir as the fallback
+                     (no `..` above it); path creation uses bank, with a
+                     PATH-free std::fs fallback
 
 KNOWLEDGE:
   kb show <PATH>     print the records stored in a knowledge bank";

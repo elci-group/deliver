@@ -10,7 +10,7 @@
 use std::fmt;
 
 use crate::address::OpAddress;
-use crate::declare::{ComponentSpec, FailureClass, RemedyId, RemedySpec, Verification};
+use crate::declare::{ComponentSpec, DeclarationError, FailureClass, RemedyId, RemedySpec, Verification};
 use crate::inference;
 use crate::knowledge::{ContextSig, KbKey, KnowledgeBase};
 use crate::policy::Policy;
@@ -117,6 +117,9 @@ pub enum StepOutcome {
     Escalated(Box<FailureReport>),
 }
 
+/// The default per-failure cap on remediation attempts. Remedies rejected by
+/// policy validation *before* execution do not consume attempts; only
+/// remedies that are actually applied count toward the cap.
 pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 
 /// The DEFAIL orchestrator.
@@ -132,14 +135,52 @@ pub struct DeFail {
 }
 
 impl DeFail {
+    /// Construct an engine from a component spec, validating it first.
+    ///
+    /// This is the compatibility constructor: the spec is validated, and
+    /// when a failure mode's declaration is invalid (a negative/NaN pattern
+    /// weight, a `min_confidence` outside `[0, 1]`, or an empty `permitted`
+    /// list) the engine still builds — but the invalid modes can never
+    /// classify: they are skipped defensively and the skip is recorded as a
+    /// [`TraceEvent::DeclarationSkipped`] event. Nothing panics. Hosts that
+    /// want invalid declarations rejected outright should use
+    /// [`DeFail::try_new`] or [`ComponentSpec::validated`].
     pub fn new(spec: ComponentSpec) -> Self {
-        Self {
+        let mut engine = Self {
             spec,
             kb: KnowledgeBase::new(),
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             events: Vec::new(),
             sink: Box::new(NoopSink),
+        };
+        let skipped: Vec<(String, DeclarationError)> = engine
+            .spec
+            .failure_modes
+            .iter()
+            .filter_map(|mode| mode.validate().err().map(|err| (mode.id.clone(), err)))
+            .collect();
+        for (mode, reason) in skipped {
+            engine.emit_event(TraceEvent::DeclarationSkipped {
+                mode,
+                reason: reason.to_string(),
+            });
         }
+        engine
+    }
+
+    /// Construct an engine from a component spec, rejecting invalid
+    /// declarations with a typed [`DeclarationError`] instead of silently
+    /// disabling the offending failure modes. See [`DeFail::new`] for the
+    /// fallback behavior.
+    pub fn try_new(spec: ComponentSpec) -> Result<Self, DeclarationError> {
+        spec.validate()?;
+        Ok(Self {
+            spec,
+            kb: KnowledgeBase::new(),
+            max_attempts: DEFAULT_MAX_ATTEMPTS,
+            events: Vec::new(),
+            sink: Box::new(NoopSink),
+        })
     }
 
     /// Attach a [`TraceSink`] to receive every decision as it happens. The
@@ -181,7 +222,9 @@ impl DeFail {
         &self.spec
     }
 
-    /// Cap remediation attempts per failure (at least 1).
+    /// Cap remediation attempts per failure (at least 1). Attempts are only
+    /// consumed by remedies that are actually applied: a remedy rejected by
+    /// pre-execution policy validation does not count against the cap.
     pub fn set_max_attempts(&mut self, n: u32) {
         self.max_attempts = n.max(1);
     }
@@ -542,5 +585,62 @@ mod tests {
         assert_eq!(from_str, from_string);
         let err = Box::new(from_str) as Box<dyn std::error::Error>;
         assert!(err.to_string().contains("window expired"));
+    }
+
+    /// A spec whose failure mode carries a negative min_confidence — invalid
+    /// per [`FailureMode::validate`] but constructible by hand.
+    fn negative_min_confidence_spec() -> ComponentSpec {
+        use crate::declare::FailureMode;
+        use crate::signal::{SignalPattern, SignalValue};
+        ComponentSpec {
+            name: "T".into(),
+            capabilities: vec![],
+            failure_modes: vec![FailureMode {
+                id: "broken-threshold".into(),
+                class: FailureClass::new("capacity/rate-limit"),
+                summary: "provider request rejected".into(),
+                patterns: vec![SignalPattern::exact("http_status", SignalValue::Int(429), 1.0)],
+                permitted: vec![RemedyId::new("fallback")],
+                verification: Verification::CapabilityAtLeast {
+                    capability: "generation".into(),
+                    tier: 3,
+                },
+                verification_desc: "equivalent request accepted".into(),
+                min_confidence: -5.0,
+            }],
+            remedies: vec![],
+        }
+    }
+
+    #[test]
+    fn try_new_rejects_invalid_specs() {
+        assert!(matches!(
+            DeFail::try_new(negative_min_confidence_spec()),
+            Err(DeclarationError::BadMinConfidence { .. })
+        ));
+        let empty = ComponentSpec {
+            name: "T".into(),
+            capabilities: vec![],
+            failure_modes: vec![],
+            remedies: vec![],
+        };
+        assert!(DeFail::try_new(empty).is_ok());
+    }
+
+    #[test]
+    fn new_with_invalid_spec_skips_the_mode_without_panicking() {
+        // The compat constructor must not panic on a spec validate() would
+        // reject: the invalid mode is excluded from classification and the
+        // skip is recorded as a trace event.
+        let engine = DeFail::new(negative_min_confidence_spec());
+        assert!(
+            matches!(
+                engine.trace(),
+                [TraceEvent::DeclarationSkipped { mode, reason }]
+                    if mode == "broken-threshold" && reason.contains("min_confidence")
+            ),
+            "unexpected trace: {:?}",
+            engine.trace()
+        );
     }
 }

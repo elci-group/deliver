@@ -2,14 +2,22 @@
 //!
 //! Path creation prefers the `bank` utility (mkdir + touch in one step).
 //! When bank is not installed, or its invocation fails for any reason, the
-//! store falls back to plain `mkdir -p` for the directory. The content
-//! itself is always written the same way: staged into a temporary file in
-//! the destination directory (created with `create_new(true)`, so there is
-//! no predictable-name symlink surface), fsynced, then atomically renamed
-//! onto the target while the previous bank stays intact, and the directory
-//! is fsynced after the rename. Both backends produce identical on-disk
-//! records; [`KnowledgeStore::save`] reports which backend actually wrote
-//! the file.
+//! store falls back to `std::fs::create_dir_all` for the directory — the
+//! `mkdir -p` equivalent, with no external process and no `PATH` surface.
+//! The content itself is always written the same way: staged into a
+//! temporary file in the destination directory (created with
+//! `create_new(true)`, so there is no predictable-name symlink surface),
+//! fsynced, then atomically renamed onto the target while the previous bank
+//! stays intact, and the directory is fsynced after the rename. Both
+//! backends produce identical on-disk records;
+//! [`KnowledgeStore::save`] reports which backend actually wrote the file.
+//!
+//! Staging file names embed the process id and a sequence counter; they are
+//! deterministic by design (reproducibility), not a secrecy mechanism. An
+//! actor with write access to the destination directory could pre-create
+//! staging names and block saves; that is out of scope for the
+//! single-threaded embedded threat model, in which the destination
+//! directory is host-controlled.
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -24,8 +32,12 @@ use crate::knowledge::{KbError, KnowledgeBase, LoadReport};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {
     /// Primary: the `bank` utility creates parent directories and the file.
+    /// This is the only backend that executes an external tool (resolved
+    /// via `PATH`).
     Bank,
-    /// Fallback: `mkdir -p` creates the directory.
+    /// Fallback: parent directories are created with
+    /// `std::fs::create_dir_all` (a `mkdir -p` equivalent). No external
+    /// processes, no `PATH` surface.
     CpMkdir,
 }
 
@@ -33,7 +45,7 @@ impl fmt::Display for Backend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Backend::Bank => f.write_str("bank"),
-            Backend::CpMkdir => f.write_str("cp+mkdir (fallback)"),
+            Backend::CpMkdir => f.write_str("cp-mkdir (fallback)"),
         }
     }
 }
@@ -46,6 +58,11 @@ pub enum StoreError {
         tool: &'static str,
         stderr: String,
     },
+    /// The bank *was* persisted — the staging file was renamed onto the
+    /// target — but confirming durability (fsync of the parent directory)
+    /// failed. The data is on disk under the target name and re-saving is
+    /// safe; no data was lost.
+    PersistedButUnconfirmed(std::io::Error),
     /// The store file exists but its records are malformed.
     Load(KbError),
     /// The save failed and the leftover staging file could not be removed
@@ -63,6 +80,11 @@ impl fmt::Display for StoreError {
             StoreError::ToolFailed { tool, stderr } => {
                 write!(f, "{tool} failed: {stderr}")
             }
+            StoreError::PersistedButUnconfirmed(err) => write!(
+                f,
+                "bank persisted but durability confirmation failed: {err}; \
+                 re-saving is safe"
+            ),
             StoreError::Load(err) => write!(f, "knowledge records malformed: {err}"),
             StoreError::CleanupFailed { save, cleanup } => write!(
                 f,
@@ -76,6 +98,7 @@ impl std::error::Error for StoreError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             StoreError::Io(err) => Some(err),
+            StoreError::PersistedButUnconfirmed(err) => Some(err),
             StoreError::Load(err) => Some(err),
             StoreError::CleanupFailed { save, .. } => Some(save),
             StoreError::ToolFailed { .. } => None,
@@ -96,12 +119,15 @@ impl From<KbError> for StoreError {
 }
 
 /// A knowledge bank on disk: a line-oriented record file managed through
-/// `bank` when available, with `mkdir -p` as the path-creation fallback.
+/// `bank` when available, with `std::fs::create_dir_all` as the
+/// path-creation fallback (no external processes).
 pub struct KnowledgeStore {
     path: PathBuf,
     backend: Backend,
 }
 
+/// Staging-name sequence, per process. Deterministic (pid, sequence), never
+/// random — see [`stage`].
 static STAGING_SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// How many staging names to try before giving up on `create_new`.
@@ -109,7 +135,7 @@ const STAGING_ATTEMPTS: u32 = 64;
 
 impl KnowledgeStore {
     /// Store at `path`, auto-detecting the backend: `bank` when the utility
-    /// is installed, `mkdir -p` otherwise.
+    /// is installed, the PATH-free `create_dir_all` fallback otherwise.
     pub fn new(path: impl Into<PathBuf>) -> Self {
         let backend = if bank_available() {
             Backend::Bank
@@ -148,8 +174,11 @@ impl KnowledgeStore {
     /// and the (empty) file, and the records are then staged and atomically
     /// renamed into place. If bank fails for any reason — missing from
     /// `PATH`, permissions, a blocked parent — the store falls back to
-    /// `mkdir -p` plus the same atomic staging rename, deterministically.
-    /// A failure mid-save leaves the previously saved bank untouched.
+    /// `std::fs::create_dir_all` plus the same atomic staging rename,
+    /// deterministically. A failure mid-save leaves the previously saved
+    /// bank untouched. When the rename succeeds but the final directory
+    /// fsync fails, the error is [`StoreError::PersistedButUnconfirmed`]:
+    /// the bank is on disk and re-saving is safe.
     pub fn save(&self, kb: &KnowledgeBase) -> Result<Backend, StoreError> {
         let body = render(kb);
         match self.backend {
@@ -169,16 +198,27 @@ impl KnowledgeStore {
 
     /// Load the knowledge bank from disk. A missing file is an error, not an
     /// empty bank: callers should know their knowledge was never persisted.
+    /// Note: lines are split with `str::lines`, which strips a raw trailing
+    /// `\r` — banks written by this crate always escape `\r`, so only
+    /// hostile hand-edits with CRLF line endings are affected.
     pub fn load(&self) -> Result<KnowledgeBase, StoreError> {
         Ok(self.load_reported()?.0)
     }
 
     /// Like [`KnowledgeStore::load`], but also returns the [`LoadReport`]
-    /// (record count and duplicate-key line numbers).
+    /// (record count, duplicate-key line numbers, and whether the file was
+    /// zero-length).
     pub fn load_reported(&self) -> Result<(KnowledgeBase, LoadReport), StoreError> {
         let text = std::fs::read_to_string(&self.path)?;
         let mut kb = KnowledgeBase::new();
-        let report = kb.load_records(text.lines().map(str::to_string))?;
+        let mut report = kb.load_records(text.lines().map(str::to_string))?;
+        if text.is_empty() {
+            // A zero-length file is not a bank this crate ever writes (even
+            // an empty base renders the format header). Flag it: it loads as
+            // an empty bank, but the caller should know the save likely
+            // never happened.
+            report.empty_file = true;
+        }
         Ok((kb, report))
     }
 
@@ -189,7 +229,7 @@ impl KnowledgeStore {
 
     fn save_with_cp_mkdir(&self, body: &str) -> Result<(), StoreError> {
         if let Some(parent) = parent_dir(&self.path) {
-            run("mkdir", &["-p", &parent.to_string_lossy()])?;
+            std::fs::create_dir_all(parent)?;
         }
         atomic_replace(&self.path, body)
     }
@@ -203,10 +243,7 @@ impl KnowledgeStore {
 fn atomic_replace(target: &Path, body: &str) -> Result<(), StoreError> {
     let staging = stage(target, body)?;
     match std::fs::rename(&staging, target) {
-        Ok(()) => {
-            sync_parent_dir(target)?;
-            Ok(())
-        }
+        Ok(()) => sync_parent_dir(target).map_err(StoreError::PersistedButUnconfirmed),
         Err(err) => {
             let save = StoreError::Io(err);
             match std::fs::remove_file(&staging) {
@@ -228,6 +265,12 @@ fn staging_dir(target: &Path) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Pick a staging file name and write `body` into it. Names are
+/// pid+sequence deterministic by design (reproducibility, per the
+/// determinism contract — no RNG, no clock), not a secrecy mechanism:
+/// an actor with write access to the destination directory can pre-create
+/// them and block saves, which is out of scope for the single-threaded
+/// embedded threat model (the destination directory is host-controlled).
 fn stage(target: &Path, body: &str) -> Result<PathBuf, StoreError> {
     let dir = staging_dir(target);
     for _ in 0..STAGING_ATTEMPTS {
@@ -255,9 +298,8 @@ fn stage(target: &Path, body: &str) -> Result<PathBuf, StoreError> {
     .into())
 }
 
-fn sync_parent_dir(target: &Path) -> Result<(), StoreError> {
-    File::open(staging_dir(target))?.sync_all()?;
-    Ok(())
+fn sync_parent_dir(target: &Path) -> Result<(), std::io::Error> {
+    File::open(staging_dir(target))?.sync_all()
 }
 
 fn render(kb: &KnowledgeBase) -> String {

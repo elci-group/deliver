@@ -91,10 +91,12 @@ The Baker example is the canonical demonstration:
 incorrectly after a failure: an operation may only run when its
 prerequisites are done and no earlier failure stands unresolved. That is
 what stops `continue_to_bake()` until a valid recovery state has been
-established. Prerequisites are checked over the transitive closure of the
-declared `requires` graph, and a cycle in that closure is reported as
-`GateReason::CyclicPrerequisites` — a cycle can never complete, so the gate
-denies the operation with the cycle named instead of gating forever.
+established. Prerequisites are the plan steps declared before the operation
+plus its direct `requires` edges (transitively-declared prerequisites are
+not individually gated on), and a cycle in the transitive closure of
+`requires` is reported as `GateReason::CyclicPrerequisites` — a cycle can
+never complete, so the gate denies the operation with the cycle named
+instead of gating forever.
 
 ## Learning
 
@@ -116,10 +118,14 @@ the rest remain as alternative-remedy counts. The join is commutative, associati
 and idempotent: banks merge in any order and re-merging an already-merged
 bank changes nothing.
 
-Declarations are validated: a failure mode with a NaN/negative pattern
-weight, a `min_confidence` outside `[0, 1]`, or an empty `permitted` remedy
-list fails loudly at construction time (`DeclarationError`,
-`ComponentSpec::validate`) instead of classifying silently.
+Declarations are validated: a failure mode with a non-positive or
+non-finite pattern weight, a `min_confidence` outside `[0, 1]`, or an
+empty `permitted` remedy list fails loudly at construction time
+(`DeclarationError`, `ComponentSpec::validate`, `DeFail::try_new`) instead
+of classifying silently. The compatibility constructor `DeFail::new` keeps
+running on an invalid spec but the invalid failure modes can never classify
+— the skip is recorded as a `declaration_skipped` trace event — so a
+hand-built spec can never make every observation "match" at confidence 1.0.
 
 ## Observability: event trace and versioned JSON exports
 
@@ -143,28 +149,41 @@ attributable diagnostic channel).
   report as JSON; `defail kb show --json <PATH>` prints the bank export.
   Exit codes are unchanged.
 
-## Persistence: bank, with a mkdir fallback
+## Persistence: bank, with a PATH-free fallback
 
 `KnowledgeStore` persists a knowledge bank to disk. Path creation prefers
 the [`bank`](../bank) utility (mkdir + touch in one step): `bank -p -f`
-creates the parent directories and the file. When bank is not installed — or
-its invocation fails for any reason — the store falls back to `mkdir -p`.
-Both backends produce identical records; `save` reports which backend
-actually wrote the file.
+creates the parent directories and the file. When bank is not installed —
+or its invocation fails for any reason — the store falls back to
+`std::fs::create_dir_all` (the `mkdir -p` equivalent): no external process,
+no `PATH` surface. Both backends produce identical records; `save` reports
+which backend actually wrote the file.
 
 The content itself is always written the same way: staged into a temporary
 file in the destination directory with `create_new(true)` (no
 predictable-name symlink surface), fsynced, atomically renamed onto the
 target, and the directory is fsynced after the rename — a failure mid-save
 never truncates the previously saved bank, and a symlinked target is
-replaced rather than written through.
+replaced rather than written through. Staging names are pid+sequence
+deterministic by design (reproducibility); they are never random, and
+blocking saves by pre-creating them requires write access to the
+destination directory, which is out of scope for the single-threaded
+embedded threat model (the destination directory is host-controlled).
 
-Note: `KnowledgeStore::new` probes `PATH` for the `bank` binary. Hosts that
-want to avoid trusting `PATH` should select the fallback explicitly:
+Note: only `Backend::Bank` executes an external tool (`bank`, resolved via
+`PATH`). The `Backend::CpMkdir` fallback is fully PATH-free. Hosts that
+cannot trust `PATH` should select the fallback explicitly:
 
 ```rust
 let store = KnowledgeStore::with_backend(".defail/knowledge", Backend::CpMkdir);
 ```
+
+Format ambiguity, accepted by design: a v1 bank (no header) whose first
+record is literally `defail-kb v2` has that line consumed as the format
+header and the rest parsed as v2 records; the loader does not heuristic-
+parse around this (determinism wins). Banks written by this crate always
+escape `\r`, so hand-editing a bank with CRLF line endings is the only way
+to corrupt trailing carriage returns.
 
 ```rust
 use defail::store::{KnowledgeStore, Backend};
@@ -249,7 +268,7 @@ changelog entry. Patch releases never change behavior.
 | `inference` | deterministic classification and causal confidence |
 | `policy` | constraint validation before and after remediation |
 | `knowledge` | the learned `failure → remediation → verification` map |
-| `store` | knowledge persistence: `bank` primary, `mkdir` fallback, atomic staging rename |
+| `store` | knowledge persistence: `bank` primary, PATH-free `create_dir_all` fallback, atomic staging rename |
 | `report` | structured `FailureReport` (the doc-format output), versioned JSON export |
 | `trace` | `TraceEvent` decision trace, `TraceSink`/`NoopSink`/`VecSink` |
 | `json` | the hand-rolled, escaping-correct JSON writer behind every export |

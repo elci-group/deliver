@@ -68,6 +68,13 @@ pub struct LoadReport {
     /// 1-based line numbers of records that overwrote an earlier record
     /// with the same key.
     pub duplicates: Vec<usize>,
+    /// True when the source file was zero-length: the load succeeds as an
+    /// empty bank (there is nothing to parse), but no valid bank is ever
+    /// zero bytes — this crate writes at least the format header — so the
+    /// flag tells the caller the save likely never happened. Only set by
+    /// the file-based loader ([`crate::store::KnowledgeStore::load_reported`]);
+    /// [`KnowledgeBase::load_records`] cannot see file length.
+    pub empty_file: bool,
 }
 
 /// Deterministic record of what has worked where. Iteration order is stable
@@ -97,7 +104,9 @@ impl KnowledgeBase {
     /// Record the outcome of one executed remediation attempt. When the key
     /// is already known under a *different* remedy id, the outcome is
     /// recorded as divergence in `alt_remedies` — never attributed to the
-    /// first-learned remedy.
+    /// first-learned remedy. Counts saturate at `u32::MAX` rather than
+    /// overflowing (loads reject `u32::MAX` counts up front, since they can
+    /// never be incremented).
     pub fn learn(
         &mut self,
         key: KbKey,
@@ -114,16 +123,16 @@ impl KnowledgeBase {
         });
         if entry.remedy == remedy {
             if succeeded {
-                entry.successes += 1;
+                entry.successes = entry.successes.saturating_add(1);
             } else {
-                entry.failures += 1;
+                entry.failures = entry.failures.saturating_add(1);
             }
         } else {
             let alt = entry.alt_remedies.entry(remedy).or_insert((0, 0));
             if succeeded {
-                alt.0 += 1;
+                alt.0 = alt.0.saturating_add(1);
             } else {
-                alt.1 += 1;
+                alt.1 = alt.1.saturating_add(1);
             }
         }
     }
@@ -237,6 +246,12 @@ impl KnowledgeBase {
     /// Duplicate keys keep the last record (retained behavior) and are
     /// reported in [`LoadReport::duplicates`]. A bad line aborts the load
     /// with line-level diagnostics, without partial mutation.
+    ///
+    /// **Format ambiguity, accepted by design:** a v1 file has no header, so
+    /// a v1 bank whose *first record* is literally `defail-kb v2` has that
+    /// line consumed as the format header and the rest of the file parsed as
+    /// escaped v2 records. This is deterministic and intentionally not
+    /// disambiguated by heuristic parsing.
     pub fn load_records<I: IntoIterator<Item = String>>(
         &mut self,
         records: I,
@@ -269,6 +284,13 @@ impl KnowledgeBase {
             let failures: u32 = raw_fields[4]
                 .parse()
                 .map_err(|_| bad("failures is not a number".into()))?;
+            for (field, count) in [("successes", successes), ("failures", failures)] {
+                if count == u32::MAX {
+                    // Uncountable: the next `learn` could never increment it
+                    // (it would saturate), so the record is meaningless.
+                    return Err(bad(format!("{field} is uncountable (u32::MAX)")));
+                }
+            }
             // The alternative-remedy field keeps its own escape level: it is
             // parsed by split_escaped_raw above but unescaped inside
             // parse_alt_field, where its `,` and `=` separators live.
@@ -473,6 +495,11 @@ fn parse_alt_field(
         let failures: u32 = failures
             .parse()
             .map_err(|_| bad(format!("alternative remedy `{remedy}` has a bad failure count")))?;
+        if successes == u32::MAX || failures == u32::MAX {
+            return Err(bad(format!(
+                "alternative remedy `{remedy}` has an uncountable (u32::MAX) count"
+            )));
+        }
         alts.insert(RemedyId::new(remedy), (successes, failures));
     }
     Ok(alts)
@@ -650,6 +677,75 @@ mod tests {
             entry.alt_remedies.get(&RemedyId::new("remedy-b")),
             Some(&(1, 1))
         );
+    }
+
+    #[test]
+    fn load_rejects_uncountable_max_counts() {
+        // successes = u32::MAX can never be incremented by learn(); loading
+        // it would either panic (debug) or wrap to 0 (release), corrupting
+        // recommendation thresholds. Both primary and alternative counts are
+        // rejected as bad records.
+        let records = vec![
+            KB_FORMAT_V2_HEADER.to_string(),
+            "capacity/rate-limit|ctx|remedy-a|4294967295|0|maxed".to_string(),
+        ];
+        let mut kb = KnowledgeBase::new();
+        let err = kb.load_records(records).unwrap_err();
+        let KbError::BadRecord(detail) = err;
+        assert!(detail.contains("record 2:"), "got {detail}");
+        assert!(detail.contains("uncountable"), "got {detail}");
+
+        let records = vec![
+            KB_FORMAT_V2_HEADER.to_string(),
+            "capacity/rate-limit|ctx|remedy-a|1|0|ok|remedy-b=4294967295/0".to_string(),
+        ];
+        let err = kb.load_records(records).unwrap_err();
+        assert!(matches!(err, KbError::BadRecord(_)));
+    }
+
+    #[test]
+    fn learn_saturates_instead_of_wrapping() {
+        // A count at u32::MAX - 1 loads fine; learning twice saturates at
+        // u32::MAX instead of wrapping to 0 in release (or panicking in
+        // debug), which would silently flip a proven remedy into an
+        // unproven one.
+        let records = vec![
+            KB_FORMAT_V2_HEADER.to_string(),
+            "capacity/rate-limit|ctx|remedy-a|4294967294|0|near max".to_string(),
+        ];
+        let mut kb = KnowledgeBase::new();
+        kb.load_records(records).unwrap();
+        let key = KbKey {
+            class: FailureClass::new("capacity/rate-limit"),
+            context: ContextSig("ctx".into()),
+        };
+        kb.learn(key.clone(), RemedyId::new("remedy-a"), "near max".into(), true);
+        kb.learn(key, RemedyId::new("remedy-a"), "near max".into(), true);
+        let entry = kb.entries().next().unwrap().1;
+        assert_eq!(entry.successes, u32::MAX);
+        // Saturated, not wrapped: the remedy is still recommended.
+        assert!(kb
+            .recommend(
+                &FailureClass::new("capacity/rate-limit"),
+                &ContextSig("ctx".into())
+            )
+            .is_some());
+    }
+
+    #[test]
+    fn v1_first_record_matching_the_v2_header_is_consumed_as_header() {
+        // Documented ambiguity: a v1 bank whose first record is literally
+        // "defail-kb v2" loses that record to the format header, and the
+        // remaining lines are parsed as escaped v2.
+        let v1 = vec![
+            "defail-kb v2".to_string(),
+            "capacity/rate-limit|ctx|remedy-a|1|0|first".to_string(),
+        ];
+        let mut kb = KnowledgeBase::new();
+        let report = kb.load_records(v1).unwrap();
+        assert_eq!(report.records, 1);
+        let entry = kb.entries().next().unwrap().1;
+        assert_eq!(entry.remedy.as_str(), "remedy-a");
     }
 
     #[test]

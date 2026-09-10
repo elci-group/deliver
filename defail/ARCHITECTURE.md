@@ -60,7 +60,7 @@ the gate permits it (see *Gate semantics* below).
 | `inference` | deterministic classification and causal confidence ranking |
 | `policy` | pre/post constraint validation (`Violation`) |
 | `knowledge` | the learned `failure class + context → remedy → outcome` map; record formats v1/v2; the `absorb` join |
-| `store` | knowledge persistence: `bank` primary, `mkdir` fallback, atomic staging rename |
+| `store` | knowledge persistence: `bank` primary, PATH-free `create_dir_all` fallback, atomic staging rename |
 | `report` | `FailureReport` (structured, attributable output) and its `defail-report/1` JSON export |
 | `trace` | `TraceEvent` decision trace, `TraceSink`/`NoopSink`/`VecSink` |
 | `json` | the hand-rolled, escaping-correct JSON writer behind every export |
@@ -141,7 +141,10 @@ Versioned, line-oriented, human-inspectable:
   reported through `LoadReport::duplicates` with 1-based line numbers.
 - **v1 (read compatibility)** — a file without the v2 header is read as
   six raw pipe-separated fields, no unescaping applied; the historical
-  `|`-to-`/` sanitization of the verification field is preserved.
+  `|`-to-`/` sanitization of the verification field is preserved. Accepted
+  ambiguity, by design: a first record line that is literally
+  `defail-kb v2` is consumed as the format header and the rest of the file
+  is parsed as v2 — the loader never heuristic-parses (determinism wins).
 
 ### Atomic store semantics
 
@@ -149,13 +152,19 @@ Versioned, line-oriented, human-inspectable:
 truncates the previously saved bank:
 
 1. Path creation prefers the `bank` utility (`bank -p -f`); any bank
-   failure deterministically falls back to `mkdir -p`. Both backends
-   produce identical records; `save` reports which backend wrote.
+   failure deterministically falls back to `std::fs::create_dir_all` (the
+   `mkdir -p` equivalent — no external process, no `PATH` surface). Both
+   backends produce identical records; `save` reports which backend wrote.
 2. The record body is staged into a *new* file in the destination
    directory, created with `create_new(true)` — a collision is an error to
    retry, never an existing file to follow or truncate, so there is no
    predictable-name symlink surface. Staging names embed the process id
-   and a counter for uniqueness; they never influence record content.
+   and a counter: deterministic by design (reproducibility), not secrecy.
+   An actor with write access to the destination directory could pre-create
+   staging names and block saves; that is out of scope for the
+   single-threaded embedded threat model, in which the destination
+   directory is host-controlled. Staging names never influence record
+   content.
 3. The staging file is written and `fsync`ed, then atomically renamed onto
    the target (a symlinked target is replaced, not written through), and
    the directory is `fsync`ed after the rename.
@@ -201,8 +210,10 @@ happened, may this run? Denials are `GateViolation`s carrying a
    order (head not repeated). Detection is an iterative white/gray/black
    depth-first search — deep plans cannot overflow the stack — visiting
    edges in declaration order so the reported cycle is deterministic.
-   Edges pointing outside the declared plan cannot form a cycle and are
-   reported separately as perpetually incomplete prerequisites.
+   Edges pointing outside the declared plan cannot form a cycle; they
+   surface as ordinary `GateReason::PrerequisitesIncomplete` entries that
+   `mark()` can never satisfy (only declared plan steps are markable), so
+   they remain incomplete until the declaration is fixed.
 3. **Blocked by failure** — an earlier plan step, or a declared
    prerequisite, is `Failed` and its failure stands unresolved:
    `GateReason::BlockedByFailure`. The application is constrained to a

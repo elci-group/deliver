@@ -29,6 +29,14 @@ pub fn classify(spec: &ComponentSpec, obs: &Observation) -> Option<Diagnosis> {
 
     for (i, mode) in spec.failure_modes.iter().enumerate() {
         // Defensive: declarations are validated at construction time, but a
+        // hand-built spec must never turn an invalid minimum confidence into
+        // "match everything" (a negative or NaN threshold makes
+        // `confidence < min_confidence` never true). Such a mode is treated
+        // as unmatchable: the observation escalates as unclassified.
+        if !mode.min_confidence.is_finite() || !(0.0..=1.0).contains(&mode.min_confidence) {
+            continue;
+        }
+        // Defensive: declarations are validated at construction time, but a
         // hand-built spec must never turn an invalid weight into a NaN
         // confidence. Invalid weights are ignored entirely.
         let valid_weight = |w: f32| w.is_finite() && w > 0.0;
@@ -177,5 +185,33 @@ mod tests {
             pattern.weight = -1.0;
         }
         assert!(classify(&negative, &obs).is_none());
+    }
+
+    #[test]
+    fn invalid_min_confidence_modes_never_match() {
+        // A hand-built spec can declare a min_confidence outside [0, 1]
+        // (negative or NaN); `confidence < min_confidence` would then never
+        // be true and every observation would "match" at confidence 1.0.
+        // Such modes must be treated as unmatchable instead.
+        let obs = Observation::new(
+            addr("T.call"),
+            "provider request rejected",
+            vec![
+                Signal::new("http_status", SignalValue::Int(429)),
+                Signal::new("quota_header", SignalValue::text("present")),
+            ],
+        );
+        for bad_threshold in [-5.0, -f32::EPSILON, f32::NAN, f32::NEG_INFINITY, 1.5] {
+            let mut bad = spec();
+            bad.failure_modes[0].min_confidence = bad_threshold;
+            assert!(
+                classify(&bad, &obs).is_none(),
+                "min_confidence {bad_threshold} must not match"
+            );
+        }
+        // In-range thresholds still work.
+        let mut ok = spec();
+        ok.failure_modes[0].min_confidence = 0.98;
+        assert!(classify(&ok, &obs).is_some());
     }
 }

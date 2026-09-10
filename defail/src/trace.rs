@@ -19,7 +19,8 @@ use crate::json;
 /// runs it: `Classified` (or `EscalatedUnclassified`), then per candidate
 /// remedy `RemedySelected` / `RemedyRejected`, `RemedyApplied`, `Resumed`,
 /// `Verified`, `Learned`, and finally `EscalatedExhausted` when no candidate
-/// survived. The gate contributes `GateDenied`.
+/// survived. The gate contributes `GateDenied`; a construction-time invalid
+/// declaration contributes `DeclarationSkipped`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TraceEvent {
     /// Classification succeeded: the observation matched a declared failure
@@ -89,6 +90,11 @@ pub enum TraceEvent {
     /// [`GateReason`](crate::enforce::GateReason) — decision data, not host
     /// payloads.
     GateDenied { address: OpAddress, reason: String },
+    /// A failure mode was excluded from classification because its
+    /// declaration is invalid (emitted by [`DeFail::new`](crate::engine::DeFail::new)
+    /// when a hand-built spec fails validation; the mode can never match, so
+    /// observations that would have matched it escalate as `unclassified`).
+    DeclarationSkipped { mode: String, reason: String },
 }
 
 /// Where a selected remedy came from.
@@ -130,6 +136,7 @@ impl TraceEvent {
             TraceEvent::Learned { .. } => "learned",
             TraceEvent::EscalatedExhausted { .. } => "escalated_exhausted",
             TraceEvent::GateDenied { .. } => "gate_denied",
+            TraceEvent::DeclarationSkipped { .. } => "declaration_skipped",
         }
     }
 
@@ -229,6 +236,10 @@ impl TraceEvent {
             }
             TraceEvent::GateDenied { address: a, reason } => {
                 fields.push(address(a));
+                fields.push(("reason", json::quote(reason)));
+            }
+            TraceEvent::DeclarationSkipped { mode, reason } => {
+                fields.push(("mode", json::quote(mode)));
                 fields.push(("reason", json::quote(reason)));
             }
         }

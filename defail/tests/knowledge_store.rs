@@ -1,7 +1,6 @@
-//! The knowledge store: bank-backed persistence with mkdir fallbacks.
+//! The knowledge store: bank-backed persistence with a PATH-free fallback.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use defail::demo::{run_baker, run_provider};
 use defail::knowledge::KnowledgeBase;
@@ -14,18 +13,13 @@ fn fresh_dir(tag: &str) -> PathBuf {
     dir
 }
 
-fn bank_installed() -> bool {
-    Command::new("bank")
-        .arg("--version")
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
-}
-
 #[test]
 fn bank_backend_round_trips_when_installed() {
-    if !bank_installed() {
-        eprintln!("skipping: bank is not installed");
+    if !KnowledgeStore::bank_available() {
+        // The absence path is verified by the same probe the store itself
+        // uses; without the bank utility the Backend::Bank path cannot be
+        // exercised at all.
+        eprintln!("SKIP: bank is not installed; Backend::Bank round trip not exercised");
         return;
     }
     let dir = fresh_dir("bank");
@@ -89,19 +83,41 @@ fn auto_detected_backend_round_trips() {
 #[test]
 fn bank_failure_engages_cp_mkdir_fallback() {
     // The parent path is a regular file, so no backend can create the store.
-    // With bank selected, the error must therefore come from the fallback
-    // tools (mkdir/cp), proving the fallback engaged after bank failed.
+    // With bank selected, the error must come from the fallback path
+    // (std::fs::create_dir_all), proving the fallback engaged after bank
+    // failed.
     let dir = fresh_dir("blocked");
     let blocker = dir.join("blocker");
     std::fs::write(&blocker, b"not a directory").unwrap();
     let store = KnowledgeStore::with_backend(blocker.join("knowledge"), Backend::Bank);
     let err = store.save(&run_provider(true).kb).unwrap_err();
     match err {
-        StoreError::ToolFailed { tool, .. } => {
-            assert!(matches!(tool, "mkdir" | "cp"), "unexpected tool: {tool}");
+        StoreError::Io(err) => {
+            // mkdir(2) reports EEXIST when the path exists as a non-directory.
+            assert_eq!(
+                err.kind(),
+                std::io::ErrorKind::AlreadyExists,
+                "expected create_dir_all to fail through the fallback, got {err}"
+            );
         }
-        other => panic!("expected ToolFailed from the fallback, got {other:?}"),
+        other => panic!(
+            "expected an i/o error from the create_dir_all fallback, got {other:?}"
+        ),
     }
+}
+
+#[test]
+fn zero_length_bank_file_is_flagged_in_the_load_report() {
+    // A zero-length file is not a bank this crate ever writes; it loads as
+    // an empty bank but the report flags it so callers know the save likely
+    // never happened.
+    let dir = fresh_dir("zero-length");
+    let store = KnowledgeStore::with_backend(dir.join("knowledge"), Backend::CpMkdir);
+    std::fs::write(store.path(), b"").unwrap();
+    let (kb, report) = store.load_reported().unwrap();
+    assert!(kb.is_empty());
+    assert_eq!(report.records, 0);
+    assert!(report.empty_file);
 }
 
 #[test]

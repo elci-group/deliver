@@ -154,7 +154,8 @@ fn join_descriptions(vs: &[Verification], sep: &str) -> String {
 /// could produce a meaningless confidence.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeclarationError {
-    /// A signal pattern weight is NaN, infinite, or negative.
+    /// A signal pattern weight is not a positive, finite number (zero,
+    /// negative, NaN, or infinite).
     BadWeight { mode: String, key: String, weight: f32 },
     /// A failure mode's minimum confidence is outside `[0, 1]`.
     BadMinConfidence { mode: String, min_confidence: f32 },
@@ -209,8 +210,10 @@ pub struct FailureMode {
 
 impl FailureMode {
     /// Validate this declaration. Returns [`DeclarationError`] on the first
-    /// problem found: a NaN/negative pattern weight, a `min_confidence`
-    /// outside `[0, 1]`, or an empty `permitted` remedy list.
+    /// problem found: a non-positive or non-finite pattern weight (zero
+    /// weights are dropped by inference, so they are rejected here), a
+    /// `min_confidence` outside `[0, 1]`, or an empty `permitted` remedy
+    /// list.
     pub fn validate(&self) -> Result<(), DeclarationError> {
         if self.permitted.is_empty() {
             return Err(DeclarationError::EmptyPermitted {
@@ -224,7 +227,7 @@ impl FailureMode {
             });
         }
         for pattern in &self.patterns {
-            if !pattern.weight.is_finite() || pattern.weight < 0.0 {
+            if !pattern.weight.is_finite() || pattern.weight <= 0.0 {
                 return Err(DeclarationError::BadWeight {
                     mode: self.id.clone(),
                     key: pattern.key.clone(),
@@ -304,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_nan_and_negative_weights() {
+    fn validation_rejects_non_positive_and_non_finite_weights() {
         let mut bad = mode();
         bad.patterns[0].weight = f32::NAN;
         assert!(matches!(
@@ -313,6 +316,14 @@ mod tests {
         ));
         let mut bad = mode();
         bad.patterns[1].weight = -0.5;
+        assert!(matches!(
+            bad.validate(),
+            Err(DeclarationError::BadWeight { .. })
+        ));
+        // Zero weights are dropped by inference (w <= 0.0 buys no evidence),
+        // so a declaration carrying one is rejected as not positive.
+        let mut bad = mode();
+        bad.patterns[1].weight = 0.0;
         assert!(matches!(
             bad.validate(),
             Err(DeclarationError::BadWeight { .. })

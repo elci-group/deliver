@@ -7,10 +7,12 @@
 //! failure stands unresolved in the plan. This is what stops
 //! `continue_to_bake()` until a valid recovery state has been established.
 //!
-//! Prerequisite semantics: a step's declared `requires` edges are checked
-//! together with the preceding plan steps, over the transitive closure of
-//! `requires`. A cycle in that graph can never complete, so instead of
-//! gating forever the gate reports
+//! Prerequisite semantics: the gate checks the plan steps declared before
+//! the operation, together with the operation's direct `requires` edges
+//! (transitively-declared prerequisites are not individually gated on).
+//! Cycle detection, however, follows the transitive closure of `requires`:
+//! a cycle in that graph can never complete, so instead of gating forever
+//! the gate reports
 //! [`GateReason::CyclicPrerequisites`] and denies the operation.
 
 use std::collections::HashMap;
@@ -122,7 +124,9 @@ impl Enforcer {
 
     /// The gate every operation must pass. `Err` means: do not run this.
     ///
-    /// Prerequisites are checked over the transitive closure of the declared
+    /// Prerequisites are the plan steps declared before the operation plus
+    /// the operation's direct `requires` edges, deduplicated in declaration
+    /// order. Cycle detection follows the transitive closure of the declared
     /// `requires` graph: if that closure contains a cycle, the operation is
     /// denied with [`GateReason::CyclicPrerequisites`] — a cycle can never
     /// complete, so gating on it would mean gating forever.
@@ -160,7 +164,11 @@ impl Enforcer {
             match state.status(&step.address) {
                 OpStatus::Done => {}
                 OpStatus::Failed if blocked.is_none() => blocked = Some(step.address.clone()),
-                _ => missing.push(step.address.clone()),
+                _ => {
+                    if !missing.contains(&step.address) {
+                        missing.push(step.address.clone());
+                    }
+                }
             }
         }
         for pre in &state.steps()[index].requires {
@@ -237,8 +245,9 @@ fn requires_of<'a>(state: &'a ExecutionState, address: &OpAddress) -> &'a [OpAdd
 
 /// Deterministic cycle detection over the declared `requires` graph, starting
 /// at `op` and following its transitive closure. Edges to addresses outside
-/// the declared plan cannot be part of a cycle (they are reported separately
-/// as perpetually incomplete prerequisites). Returns the first cycle found,
+/// the declared plan cannot be part of a cycle; they are skipped here and
+/// surface as ordinary incomplete prerequisites that `mark()` can never
+/// satisfy. Returns the first cycle found,
 /// in traversal order with the head not repeated, or `None`.
 fn cyclic_prerequisites(state: &ExecutionState, op: &OpAddress) -> Option<Vec<OpAddress>> {
     // Iterative depth-first search with white/gray/black coloring, so a
@@ -435,6 +444,25 @@ mod tests {
             panic!("expected a cycle violation, got {err}");
         };
         assert_eq!(cycle, &vec![b, c]);
+    }
+
+    #[test]
+    fn duplicate_plan_addresses_are_reported_once() {
+        // A plan that declares the same address twice must not duplicate the
+        // address in the denial: entries are deduplicated, preserving
+        // declaration order.
+        let mix = addr("app.mix");
+        let bake = addr("app.bake");
+        let state = ExecutionState::new(vec![
+            PlanStep::new(mix.clone(), "mix"),
+            PlanStep::new(mix.clone(), "mix again"),
+            PlanStep::new(bake.clone(), "bake"),
+        ]);
+        let err = enforcer().request(&state, &bake).unwrap_err();
+        assert!(matches!(
+            err.reason,
+            GateReason::PrerequisitesIncomplete(ref missing) if missing == &vec![mix]
+        ));
     }
 
     #[test]

@@ -14,7 +14,7 @@ means five pillars, each with an objective exit criterion:
 | 1. Correctness & determinism | Every decision reproducible; no panics on any input; validated declarations | Property + adversarial test suite, 100× determinism property |
 | 2. Durability & crash safety | KB stores are atomic (write-temp + rename + fsync); corrupt state is detected and reported precisely | Crash-consistency and corruption tests |
 | 3. Observability | Every pipeline decision emits a structured, machine-readable event; reports exportable as versioned JSON | Event-sequence assertions, golden JSON tests |
-| 4. Security posture | No predictable temp files, no silent PATH trust, no injection into record format | Adversarial input tests, symlink/tamper tests |
+| 4. Security posture | No `/tmp` staging, no predictable-name symlink surface, no silent PATH trust (only the opt-in `Backend::Bank` execs an external tool), no injection into record format | Adversarial input tests, symlink/tamper tests |
 | 5. Operability & docs | Documented threading contract, architecture doc, stable API policy, enforced quality gate | `deliver` gate expanded and green |
 
 Constraint honored throughout: **zero runtime dependencies**. Determinism and auditability
@@ -75,6 +75,17 @@ Exit: cycle-detection tests; docs reviewed against code; examples compile and ru
 - [ ] P3.3 External analysis: `uni analyze` snapshot reviewed; `uni revise --apply`
       remediations evaluated individually and either merged or documented as rejected
       with rationale.
+- [x] P3.4 Closing audit (2026-09-10, findings F1–F12): KB counts saturate and
+      `u32::MAX` counts are rejected at load; `DeFail::try_new` validates while
+      `DeFail::new` keeps its panic-free contract (invalid modes cannot classify,
+      recorded as `declaration_skipped` trace events); classify guards
+      `min_confidence`; zero-weight patterns rejected; gate denials deduplicated;
+      `Backend::CpMkdir` became fully PATH-free (`std::fs::create_dir_all`, no
+      external processes); staging-name determinism documented as in-scope for
+      reproducibility with collision-DoS by a destination-dir writer out of scope;
+      new `StoreError::PersistedButUnconfirmed` and `LoadReport::empty_file`.
+      API additions only: new `TraceEvent`/`StoreError` variants and a
+      `LoadReport` field.
 
 Exit: full suite + clippy + deliver gate green; uni findings dispositioned in AUDIT.md.
 
@@ -87,3 +98,6 @@ Exit: full suite + clippy + deliver gate green; uni findings dispositioned in AU
 - R3: Validation rejects declarations that demo code currently constructs → mitigate:
   fix demos in the same commit; constructor APIs gain `try_new` while `new` documents
   its panic-free validation contract.
+
+- [x] P3.3 External analysis: `uni analyze` snapshot reviewed; `uni revise --apply` executed — isopod merged, lwoodz unavailable (stale command), traci/fract AI patches rejected with rationale (see AUDIT.md)
+- [x] P3.4 Closing audit: 12 findings fixed, dispositions recorded in AUDIT.md
