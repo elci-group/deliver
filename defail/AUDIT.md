@@ -2,9 +2,10 @@
 
 Scope: (A) gaps in defail itself after the SOTA roadmap execution; (B) gaps in the uni
 tooling that analyzed/revised the project. Method: fresh-eyes adversarial audit with
-compiled probes, then fixes; `uni analyze` + `uni revise` snapshots retained in
-`/tmp/defail-uni-analysis.json` and `/tmp/defail-uni-revise*.json` (also
-`.uni/snapshot-v1.json`, `.uni/revise-journal.jsonl`).
+compiled probes, then fixes. Evidence retention: the `uni analyze` / `uni revise`
+snapshots live in `.uni/snapshot-v1.json` and `.uni/revise-journal.jsonl` (durable,
+workspace-local, gitignored); convenience copies at `/tmp/defail-uni-*.json` are
+ephemeral and should not be relied upon.
 
 ## A. Defail findings — all 12 dispositioned
 
@@ -23,9 +24,10 @@ compiled probes, then fixes; `uni analyze` + `uni revise` snapshots retained in
 | F11 | minor | Doc/behavior mismatches (BadWeight wording, gate prerequisites claim) | **Fixed** |
 | F12 | minor | Bank test tautologically passes when `bank` absent; missing negative tests | **Fixed** — explicit skip + 8 new tests |
 
-Post-fix state: **82 tests green** (was 28 at restore), `cargo clippy -- -D warnings`
-clean, `deliver --spec deliver.toml --strict` **18/18**, zero deps, no unsafe, no
-time/random/thread APIs in `src/`.
+Post-fix state, as re-verified after the F13 follow-up (§C): **82 tests green**
+(was 28 at restore), `cargo clippy -- -D warnings` clean, `deliver --spec
+deliver.toml --strict` **18/18**, zero deps, no unsafe, no time/random/thread APIs
+in `src/`.
 
 ## B. Uni tooling gaps (tools that touched defail)
 
@@ -78,10 +80,30 @@ tools graded); integrity **degraded**. Defects, in severity order:
   within entropy budget). Risk/reward unacceptable; deterministic human-directed fixes
   in section A supersede them.
 
+## C. Post-audit follow-up (2026-09-10, same day)
+
+A documentation-state review found that the verification claims above did not
+reproduce from the committed tree:
+
+- **F13 (major): the property-test target never compiled.** `tests/properties.rs`
+  was introduced in 071525c with a type-inference error at its only `pick` call
+  site — `push_str(rng.pick(FRAGMENTS))` drove the generic `T` to the unsized
+  `str` (E0308), so `cargo test` failed at compile time and the actual state was
+  79/82 tests green. The "82 tests green / deliver 18/18" claims in §A were
+  therefore not true at commit time; the counts appear to have been taken from a
+  static count of `#[test]` functions rather than a passing run. **Fixed** by
+  binding the picked fragment before `push_str`; re-verified from the fixed tree:
+  `cargo build --all-targets`, 82/82 tests, `cargo clippy --all-targets --
+  -D warnings`, and `deliver --spec deliver.toml --strict` 18/18, all green.
+- **Commit traceability:** 071525c is labeled "uni revise: apply isopod" but also
+  introduced the 267-line property suite; isopod itself only added `SECURITY.md`
+  and `.github/dependabot.yml`. The commit message under-describes the commit.
+
 ## Verdict
 
-Defail: SOTA claim is defensible **within its stated scope** after F1–F12; residual
-accepted gaps (F6, F7, F9) are documented scoping decisions, not unknown defects.
+Defail: SOTA claim is defensible **within its stated scope** after F1–F12 and the
+F13 follow-up; residual accepted gaps (F6, F7, F9) are documented scoping
+decisions, not unknown defects.
 Uni: revision loop completed honestly (dry-run → apply → per-remediation verification),
 but amber, lwoodz, and ferret require fixes before their uni scores/finding counts can
 be trusted on dep-free projects.

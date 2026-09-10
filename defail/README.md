@@ -152,7 +152,7 @@ attributable diagnostic channel).
 ## Persistence: bank, with a PATH-free fallback
 
 `KnowledgeStore` persists a knowledge bank to disk. Path creation prefers
-the [`bank`](../bank) utility (mkdir + touch in one step): `bank -p -f`
+the `bank` utility (mkdir + touch in one step, resolved via `PATH`): `bank -p -f`
 creates the parent directories and the file. When bank is not installed —
 or its invocation fails for any reason — the store falls back to
 `std::fs::create_dir_all` (the `mkdir -p` equivalent): no external process,

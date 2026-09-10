@@ -72,9 +72,9 @@ Exit: cycle-detection tests; docs reviewed against code; examples compile and ru
       stability under signal reordering.
 - [x] P3.2 `deliver.toml` gate expansion: add `cargo clippy -- -D warnings`, forbid-regex
       coverage for new modules, JSON export smoke command.
-- [ ] P3.3 External analysis: `uni analyze` snapshot reviewed; `uni revise --apply`
-      remediations evaluated individually and either merged or documented as rejected
-      with rationale.
+- [x] P3.3 External analysis: `uni analyze` snapshot reviewed; `uni revise --apply`
+      executed — isopod merged (new files only), lwoodz unavailable (stale command),
+      traci/fract AI patches rejected with rationale (see AUDIT.md).
 - [x] P3.4 Closing audit (2026-09-10, findings F1–F12): KB counts saturate and
       `u32::MAX` counts are rejected at load; `DeFail::try_new` validates while
       `DeFail::new` keeps its panic-free contract (invalid modes cannot classify,
@@ -86,6 +86,11 @@ Exit: cycle-detection tests; docs reviewed against code; examples compile and ru
       new `StoreError::PersistedButUnconfirmed` and `LoadReport::empty_file`.
       API additions only: new `TraceEvent`/`StoreError` variants and a
       `LoadReport` field.
+- [x] P3.5 Post-audit follow-up (2026-09-10, AUDIT.md §C / F13): the property-test
+      target introduced in 071525c did not compile (generic `pick` inference vs
+      `push_str` at its only call site), so the audit's "82 tests green / deliver
+      18/18" claims did not hold at commit time; call site fixed, full suite +
+      clippy + deliver gate re-run green.
 
 Exit: full suite + clippy + deliver gate green; uni findings dispositioned in AUDIT.md.
 
@@ -98,6 +103,3 @@ Exit: full suite + clippy + deliver gate green; uni findings dispositioned in AU
 - R3: Validation rejects declarations that demo code currently constructs → mitigate:
   fix demos in the same commit; constructor APIs gain `try_new` while `new` documents
   its panic-free validation contract.
-
-- [x] P3.3 External analysis: `uni analyze` snapshot reviewed; `uni revise --apply` executed — isopod merged, lwoodz unavailable (stale command), traci/fract AI patches rejected with rationale (see AUDIT.md)
-- [x] P3.4 Closing audit: 12 findings fixed, dispositions recorded in AUDIT.md

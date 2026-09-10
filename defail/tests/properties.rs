@@ -54,7 +54,10 @@ const FRAGMENTS: &[&str] = &[
 fn gen_string(rng: &mut Rng, max_fragments: u64) -> String {
     let mut out = String::new();
     for _ in 0..rng.below(max_fragments + 1) {
-        out.push_str(rng.pick(FRAGMENTS));
+        // Bound first: passing `pick`'s `&&str` straight to `push_str` drives
+        // inference of `T` to the unsized `str` and fails to compile.
+        let fragment = rng.pick(FRAGMENTS);
+        out.push_str(fragment);
     }
     out
 }
