@@ -1,0 +1,104 @@
+[[file]]
+path = "Cargo.toml"
+required = true
+
+[[file]]
+path = "src/lib.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "todo!"]
+
+[[file]]
+path = "src/engine.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "src/enforce.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "src/demo.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "src/store.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "src/trace.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "src/json.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!"]
+
+[[file]]
+path = "tests/knowledge_store.rs"
+required = true
+
+[[file]]
+path = "tests/end_to_end.rs"
+required = true
+
+[[file]]
+path = "tests/properties.rs"
+required = true
+
+[[file]]
+path = "README.md"
+required = true
+require_regex = ["Deterministic Embedded Failure Addressing Inference Logic"]
+
+[[command]]
+name = "cargo build"
+cmd = ["cargo", "build", "--all-targets"]
+expect_exit = 0
+timeout_secs = 120
+
+[[command]]
+name = "cargo test"
+cmd = ["cargo", "test"]
+cwd = "/home/sal/defail"
+# The system rustdoc (/usr/bin/rustdoc) resolves libLLVM from the rustlib
+# lib dir, which is not on the default loader path.
+env = { LD_LIBRARY_PATH = "/usr/lib/rustlib/x86_64-unknown-linux-gnu/lib" }
+expect_exit = 0
+timeout_secs = 180
+stdout_contains = ["test result: ok"]
+
+[[command]]
+name = "defail demo baker --late"
+cmd = ["cargo", "run", "--quiet", "--", "demo", "baker", "--late"]
+expect_exit = 0
+timeout_secs = 120
+stdout_contains = ["Disposition: recovered", "substitution window expired"]
+
+[[command]]
+name = "knowledge bank round trip"
+cmd = ["sh", "-c", "rm -f target/deliver-kb && cargo run --quiet -- demo provider --save-kb target/deliver-kb && cargo run --quiet -- kb show target/deliver-kb"]
+cwd = "/home/sal/defail"
+expect_exit = 0
+timeout_secs = 120
+stdout_contains = ["Knowledge bank saved", "capacity/rate-limit"]
+
+[[command]]
+name = "cargo clippy"
+cmd = ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"]
+cwd = "/home/sal/defail"
+# Same rustdoc/libLLVM loader caveat as the cargo test check above.
+env = { LD_LIBRARY_PATH = "/usr/lib/rustlib/x86_64-unknown-linux-gnu/lib" }
+expect_exit = 0
+timeout_secs = 300
+
+[[command]]
+name = "defail demo baker --late --json"
+cmd = ["cargo", "run", "--quiet", "--", "demo", "baker", "--late", "--json"]
+cwd = "/home/sal/defail"
+expect_exit = 0
+timeout_secs = 120
+stdout_contains = ["\"schema\":\"defail-report/1\""]
