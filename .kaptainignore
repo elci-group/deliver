@@ -1,8 +1,0 @@
-.git
-.agents
-.codex
-.kaptaind
-target
-*.log
-.env
-.env.*
