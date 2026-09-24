@@ -1,0 +1,33 @@
+{
+  "model": "gpt-5.6",
+  "seed": 20260908,
+  "repetitions": 3,
+  "scorer": "deliver --spec deliver.toml --strict, outside the agent invocation",
+  "conditions": {
+    "control": {
+      "agent_completion_rate": 0.0,
+      "acceptance_rate": 0.0,
+      "acceptance_rate_when_completed": null,
+      "mean_elapsed_secs": 2.695,
+      "median_elapsed_secs": 2.67,
+      "mean_tokens_reported": null,
+      "token_coverage": "0/3"
+    },
+    "deliver": {
+      "agent_completion_rate": 0.0,
+      "acceptance_rate": 0.0,
+      "acceptance_rate_when_completed": null,
+      "mean_elapsed_secs": 2.784,
+      "median_elapsed_secs": 2.719,
+      "mean_tokens_reported": null,
+      "token_coverage": "0/3"
+    }
+  },
+  "paired_deltas_deliver_minus_control": {
+    "acceptance": 0.0,
+    "elapsed_secs": 0.089,
+    "tokens": null
+  },
+  "valid_comparison": false,
+  "invalid_reason": "All six agent invocations were rejected before work began: gpt-5.6 is unsupported for this Codex ChatGPT-account route."
+}

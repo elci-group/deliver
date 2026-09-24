@@ -1,0 +1,30 @@
+[[file]]
+path = "run_benchmark.py"
+required = true
+min_size_bytes = 5000
+forbid_regex = ["TODO", "FIXME"]
+
+[[file]]
+path = "README.md"
+required = true
+min_size_bytes = 1000
+
+[[file]]
+path = "test_run_benchmark.py"
+required = true
+
+[[file]]
+path = "fixture/deliver.toml"
+required = true
+
+[[command]]
+name = "benchmark runner syntax"
+cmd = ["python3", "-m", "py_compile", "run_benchmark.py"]
+expect_exit = 0
+timeout_secs = 30
+
+[[command]]
+name = "benchmark tests"
+cmd = ["python3", "-m", "unittest", "-v", "test_run_benchmark.py"]
+expect_exit = 0
+timeout_secs = 90

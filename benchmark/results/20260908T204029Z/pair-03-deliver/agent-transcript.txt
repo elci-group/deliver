@@ -1,0 +1,18 @@
+{"type":"thread.started","thread_id":"01a082c0-6b91-7ca2-ad23-c7538598704a"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `gpt-5.6` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-5.6' model is not supported when using Codex with a ChatGPT account.\"}}"}
+{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-5.6' model is not supported when using Codex with a ChatGPT account.\"}}"}}
+
+--- stderr ---
+Reading additional input from stdin...
+2026-09-08T20:40:43.728280Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/boar/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:40:43.728323Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/git-engine/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:40:43.728326Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/poka/SKILL.md: invalid YAML: could not find expected ':' at line 5 column 1, while scanning a simple key at line 4 column 1
+2026-09-08T20:40:43.728330Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/vico-drag/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:40:43.728333Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/webdev/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:40:43.804500Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/boar/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:40:43.804515Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/git-engine/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:40:43.804518Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/poka/SKILL.md: invalid YAML: could not find expected ':' at line 5 column 1, while scanning a simple key at line 4 column 1
+2026-09-08T20:40:43.804521Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/vico-drag/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:40:43.804524Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/webdev/SKILL.md: missing YAML frontmatter delimited by ---

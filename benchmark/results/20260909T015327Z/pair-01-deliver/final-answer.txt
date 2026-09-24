@@ -1,0 +1,3 @@
+Implemented `parse_percent` in `calculator.py`, including format, type, and range validation.
+
+`deliver --spec deliver.toml --strict` passed both checks, including the test suite. The three protected files remain unchanged.

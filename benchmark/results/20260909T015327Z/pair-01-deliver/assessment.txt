@@ -1,0 +1,5 @@
+deliver report: PASS
+2 checks: 2 passed, 0 failed in 405 ms
+
+✓ file: calculator.py [file] OK (618 bytes)
+✓ fixture tests [command] OK (exit 0, 401 ms)

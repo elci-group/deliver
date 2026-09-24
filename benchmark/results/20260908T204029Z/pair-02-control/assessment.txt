@@ -1,0 +1,5 @@
+deliver report: FAIL
+2 checks: 0 passed, 2 failed in 104 ms
+
+✗ file: calculator.py [file] content matches forbidden regex: 'NotImplementedError'. Suggestion: remove the matching content or adjust the regex.
+✗ fixture tests [command] exit code Some(1), expected 0 (100 ms). Suggestion: fix the command or adjust expect_exit.

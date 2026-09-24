@@ -1,0 +1,17 @@
+{"type":"thread.started","thread_id":"01a082c4-1328-7140-9a16-a776940380c5"}
+{"type":"turn.started"}
+{"type":"error","message":"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 9th, 2026 1:09 AM."}
+{"type":"turn.failed","error":{"message":"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 9th, 2026 1:09 AM."}}
+
+--- stderr ---
+Reading additional input from stdin...
+2026-09-08T20:44:43.229106Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/boar/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:44:43.229144Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/git-engine/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:44:43.229151Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/poka/SKILL.md: invalid YAML: could not find expected ':' at line 5 column 1, while scanning a simple key at line 4 column 1
+2026-09-08T20:44:43.229157Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/vico-drag/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:44:43.229161Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/webdev/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:44:43.340230Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/boar/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:44:43.340249Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/git-engine/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:44:43.340255Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/poka/SKILL.md: invalid YAML: could not find expected ':' at line 5 column 1, while scanning a simple key at line 4 column 1
+2026-09-08T20:44:43.340259Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/vico-drag/SKILL.md: missing YAML frontmatter delimited by ---
+2026-09-08T20:44:43.340262Z ERROR codex_core::session::session: failed to load skill /home/sal/.agents/skills/webdev/SKILL.md: missing YAML frontmatter delimited by ---

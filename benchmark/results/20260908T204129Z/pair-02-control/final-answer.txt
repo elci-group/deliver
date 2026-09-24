@@ -1,0 +1,3 @@
+Implemented `parse_percent` in `calculator.py` with input validation and fraction conversion.
+
+All 3 tests and additional boundary checks pass. Protected files remain unchanged; deliver was not used.

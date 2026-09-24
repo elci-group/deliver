@@ -1,0 +1,5 @@
+Implemented `parse_percent` in `calculator.py` with format validation, range checking, and fraction conversion.
+
+`deliver --spec deliver.toml --strict` passed both checks, including the test suite. Protected files were unchanged.
+
+Lease release failed; the two-minute lease will expire automatically.

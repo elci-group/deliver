@@ -1,0 +1,27 @@
+{
+  "model": "codex-cli-default",
+  "seed": 20260908,
+  "repetitions": 3,
+  "scorer": "deliver --spec deliver.toml --strict, outside the agent invocation",
+  "conditions": {
+    "control": {
+      "acceptance_rate": 0.6666666666666666,
+      "mean_elapsed_secs": 30.77,
+      "median_elapsed_secs": 40.285,
+      "mean_tokens_reported": 93173.5,
+      "token_coverage": "2/3"
+    },
+    "deliver": {
+      "acceptance_rate": 0.6666666666666666,
+      "mean_elapsed_secs": 35.809,
+      "median_elapsed_secs": 40.876,
+      "mean_tokens_reported": 106187.5,
+      "token_coverage": "2/3"
+    }
+  },
+  "paired_deltas_deliver_minus_control": {
+    "acceptance": 0.0,
+    "elapsed_secs": 5.038,
+    "tokens": 13014
+  }
+}

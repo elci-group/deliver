@@ -1,0 +1,7 @@
+pair,condition,agent_exit,timed_out,agent_completed,elapsed_secs,tokens,token_source,acceptance_pass,trial_dir
+1,deliver,0,False,True,31.945,93859,agent JSON usage,True,pair-01-deliver
+1,control,0,False,True,39.503,82496,agent JSON usage,True,pair-01-control
+2,deliver,0,False,True,35.479,93448,agent JSON usage,True,pair-02-deliver
+2,control,0,False,True,33.144,81944,agent JSON usage,True,pair-02-control
+3,control,0,False,True,43.673,80117,agent JSON usage,True,pair-03-control
+3,deliver,0,False,True,33.111,118733,agent JSON usage,True,pair-03-deliver

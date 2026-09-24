@@ -2,3 +2,6 @@
 /.kaptaind/
 /.agents/
 /.codex/
+__pycache__/
+/.deliver
+/.orb

@@ -1,0 +1,3 @@
+Implemented `parse_percent` in `calculator.py` with whitespace handling, optional `%`, range validation, and `ValueError` for invalid inputs.
+
+All 3 tests and additional boundary checks pass. Protected files were unchanged; deliver was not used.

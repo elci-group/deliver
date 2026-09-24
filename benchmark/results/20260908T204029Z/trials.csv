@@ -1,0 +1,7 @@
+pair,condition,agent_exit,timed_out,elapsed_secs,tokens,token_source,acceptance_pass,trial_dir
+1,deliver,1,False,2.533,,not reported,False,pair-01-deliver
+1,control,1,False,2.67,,not reported,False,pair-01-control
+2,deliver,1,False,3.1,,not reported,False,pair-02-deliver
+2,control,1,False,2.792,,not reported,False,pair-02-control
+3,control,1,False,2.622,,not reported,False,pair-03-control
+3,deliver,1,False,2.719,,not reported,False,pair-03-deliver

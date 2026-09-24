@@ -1,0 +1,10 @@
+[[file]]
+path = "calculator.py"
+required = true
+forbid_regex = ["NotImplementedError", "TODO", "FIXME"]
+
+[[command]]
+name = "fixture tests"
+cmd = ["python3", "-m", "unittest", "-v"]
+expect_exit = 0
+timeout_secs = 30
