@@ -23,11 +23,22 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent
-FIXTURE = ROOT / "fixture"
 
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def protected_digests(fixture: Path) -> dict[str, str]:
+    """Hash the fixture files agents must never modify.
+
+    Convention: the task README, the deliver spec, and every test_*.py are
+    protected; every other file is the agent's to edit or create.
+    """
+    names = sorted(entry.name for entry in fixture.iterdir()
+                   if entry.name in ("README.md", "deliver.toml")
+                   or (entry.name.startswith("test_") and entry.suffix == ".py"))
+    return {name: digest(fixture / name) for name in names}
 
 
 def substitute(tokens: list[str], values: dict[str, str]) -> list[str]:
@@ -123,6 +134,8 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--repetitions", type=int, default=3, help="paired trials per condition (default: 3)")
     parser.add_argument("--seed", type=int, default=20260908)
+    parser.add_argument("--fixture-dir", type=Path, default=None,
+                        help="task fixture directory (default: benchmark/fixture)")
     parser.add_argument("--runs-dir", type=Path, default=None)
     parser.add_argument("--timeout-secs", type=int, default=900)
     parser.add_argument("--input-usd-per-million", type=float, default=None,
@@ -143,8 +156,11 @@ def main() -> int:
         parser.error("--agent-cmd must include {prompt} as a standalone token")
     run_root = args.runs_dir or ROOT / "results" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_root.mkdir(parents=True, exist_ok=False)
+    fixture = (args.fixture_dir or (ROOT / "fixture")).resolve()
+    if not fixture.is_dir():
+        parser.error(f"--fixture-dir is not a directory: {fixture}")
     prompt_template = (ROOT / "task_prompt.md").read_text()
-    protected = {name: digest(FIXTURE / name) for name in ("test_calculator.py", "deliver.toml", "README.md")}
+    protected = protected_digests(fixture)
     rng = random.Random(args.seed)
     rates = {"input": args.input_usd_per_million, "cached_input": args.cached_input_usd_per_million,
              "output": args.output_usd_per_million}
@@ -156,7 +172,7 @@ def main() -> int:
         for condition in conditions:
             trial = run_root / f"pair-{pair:02d}-{condition}"
             project = trial / "project"
-            shutil.copytree(FIXTURE, project)
+            shutil.copytree(fixture, project, ignore=shutil.ignore_patterns("__pycache__"))
             treatment = (
                 "Before your final response, run `deliver --spec deliver.toml --strict` and fix any failure."
                 if condition == "deliver"
@@ -201,6 +217,7 @@ def main() -> int:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     summary: dict[str, Any] = {"model": args.model, "seed": args.seed, "repetitions": args.repetitions,
+                               "fixture": fixture.name,
                                "scorer": "deliver --spec deliver.toml --strict, outside the agent invocation", "conditions": {}}
     for condition in ("control", "deliver"):
         group = [row for row in rows if row["condition"] == condition]

@@ -11,6 +11,19 @@ Python task. The only experimental difference is the final instruction:
 | --- | --- |
 | Do not use `deliver`. | Run `deliver --spec deliver.toml --strict` before finishing. |
 
+Two fixtures ship with the harness: `fixture/` (CSV sales-summary parsing) and
+`fixture-hard/` (a cron next-occurrence calculator with leap-year, day-matching
+rule, and error-handling traps — added because control-arm agents pass the easy
+task too often to compare conditions). Select a fixture with `--fixture-dir`:
+
+```bash
+python3 benchmark/run_benchmark.py --fixture-dir benchmark/fixture-hard ...
+```
+
+In any fixture, `README.md`, `deliver.toml`, and every `test_*.py` are
+protected: the runner hashes them before the run and fails acceptance if an
+agent modified them.
+
 The runner randomizes the order within each pair to reduce warm-up and cache
 effects. It externally grades *both* conditions with the same `deliver` spec,
 after the agent has stopped. This is important: a treatment run's self-check is

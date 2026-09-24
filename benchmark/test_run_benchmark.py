@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from run_benchmark import cost_usd
+from run_benchmark import cost_usd, protected_digests
 
 BENCHMARK = Path(__file__).resolve().parent
 
@@ -17,6 +17,15 @@ class BenchmarkRunnerTests(unittest.TestCase):
                   "output_tokens": 200, "reasoning_output_tokens": 20}
         self.assertEqual(cost_usd(detail, {"input": 2.0, "cached_input": 0.2, "output": 10.0}), 0.00292)
         self.assertIsNone(cost_usd(detail, {"input": 2.0, "cached_input": None, "output": 10.0}))
+
+    def test_protected_digests_follow_the_fixture_convention(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = Path(temporary)
+            for name in ("README.md", "deliver.toml", "test_task.py", "task.py", "notes.txt"):
+                (fixture / name).write_text(name)
+            digests = protected_digests(fixture)
+        self.assertEqual(sorted(digests), ["README.md", "deliver.toml", "test_task.py"])
+
 
     def test_runs_balanced_pairs_and_reports_usage(self):
         with tempfile.TemporaryDirectory() as temporary:
