@@ -77,21 +77,23 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
     }
 }
 
+fn invalid_commit_message_regex(name: String, pattern: &str, error: regex::Error) -> CheckResult {
+    CheckResult {
+        name,
+        pass: false,
+        kind: "git".to_string(),
+        message: format!(
+            "invalid require_commit_message_regex '{}': {}. Suggestion: fix the regex syntax.",
+            pattern, error
+        ),
+    }
+}
+
 fn validate_commit_message(base: &Path, pattern: &str) -> CheckResult {
     let name = "git: last commit message".to_string();
     let regex = match Regex::new(pattern) {
         Ok(regex) => regex,
-        Err(error) => {
-            return CheckResult {
-                name,
-                pass: false,
-                kind: "git".to_string(),
-                message: format!(
-                    "invalid require_commit_message_regex '{}': {}. Suggestion: fix the regex syntax.",
-                    pattern, error
-                ),
-            }
-        }
+        Err(error) => return invalid_commit_message_regex(name, pattern, error),
     };
 
     let output = Command::new("git")

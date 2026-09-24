@@ -50,6 +50,18 @@ required = true
 min_size_bytes = 1200
 require_regex = ["Detailed Results", "deliver_vs_shell", "Reproducing"]
 
+[[file]]
+path = "ROADMAP.md"
+required = true
+min_size_bytes = 1200
+require_regex = [
+  "\\[x\\] Git commit message validation",
+  "\\[x\\] Git branch validation",
+  "\\[x\\] Parallel check execution \\(`--jobs`\\)",
+  "\\[x\\] SARIF 2\\.1\\.0 output",
+  "\\[x\\] JUnit XML output",
+]
+
 [[command]]
 name = "cargo test"
 cmd = ["cargo", "test"]

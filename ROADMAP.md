@@ -1,6 +1,9 @@
 # Deliver: Roadmap to SOTA
 
-_Last assessed: 2026-08-21, against v0.2.0._
+_Last assessed: 2026-09-24, against v0.2.0. Checkbox audit on 2026-09-24
+found several shipped features still unticked (git branch/commit-message
+validation, `--jobs`, SARIF, JUnit); boxes below now match the code, and
+`deliver.toml` greps the shipped markers so this drift alarms going forward._
 
 ## Current State Assessment
 
@@ -158,19 +161,19 @@ _agents that need deterministic proof_.
 - [x] License header validation
 - [x] Cross-file reference validation (Rust/Python/JS/TS/C/C++)
 - [x] TOML/JSON key-path queries
-- [ ] Git commit message validation
-- [ ] Git branch validation
+- [x] Git commit message validation
+- [x] Git branch validation
 - [ ] Conditional checks (`when`)
 
 ### Phase 3: Performance & Parallelism (v0.4.0)
-- [ ] Parallel check execution (`--jobs`)
+- [x] Parallel check execution (`--jobs`)
 - [ ] Incremental validation (git-diff-aware: only re-check what changed)
 - [ ] Result caching keyed by file content hash
 - [ ] Early termination on first failure (opt-in)
 
 ### Phase 4: Output & Reporting (v0.5.0)
-- [ ] SARIF 2.1.0 output
-- [ ] JUnit XML output
+- [x] SARIF 2.1.0 output
+- [x] JUnit XML output
 - [ ] Streaming NDJSON output
 - [ ] GitHub Actions inline annotations
 
