@@ -50,7 +50,8 @@ pub fn spec_json_schema() -> Value {
                         "type": "boolean",
                         "default": false,
                         "description": "For .rs/.py/.js/.ts/.jsx/.tsx/.c/.cpp/.h/.hpp files, fail if a local mod/import/#include reference does not exist."
-                    }
+                    },
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." }
                 }
             },
             "command_check": {
@@ -70,7 +71,8 @@ pub fn spec_json_schema() -> Value {
                     "expect_exit": { "type": "integer", "default": 0 },
                     "timeout_secs": { "type": "integer", "minimum": 0, "default": 300 },
                     "stdout_contains": { "type": "array", "items": { "type": "string" } },
-                    "stderr_contains": { "type": "array", "items": { "type": "string" } }
+                    "stderr_contains": { "type": "array", "items": { "type": "string" } },
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." }
                 }
             },
             "directory_check": {
@@ -82,7 +84,8 @@ pub fn spec_json_schema() -> Value {
                     "required": { "type": "boolean", "default": true },
                     "min_files": { "type": "integer", "minimum": 0 },
                     "max_files": { "type": "integer", "minimum": 0 },
-                    "forbid_empty": { "type": "boolean", "default": false }
+                    "forbid_empty": { "type": "boolean", "default": false },
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." }
                 }
             },
             "git_check": {
@@ -115,12 +118,20 @@ mod tests {
         let schema = spec_json_schema();
         let compiled = JSONSchema::compile(&schema).unwrap();
         let instance = json!({
-            "file": [{"path": "README.md", "required": true, "min_size_bytes": 10}],
-            "command": [{"name": "test", "cmd": ["cargo", "test"]}],
-            "directory": [{"path": "src", "forbid_empty": true}],
+            "file": [{"path": "README.md", "required": true, "min_size_bytes": 10, "weight": 1.0}],
+            "command": [{"name": "test", "cmd": ["cargo", "test"], "weight": 4.0}],
+            "directory": [{"path": "src", "forbid_empty": true, "weight": 2.5}],
             "git": {"no_uncommitted_changes": true}
         });
         assert!(compiled.is_valid(&instance));
+    }
+
+    #[test]
+    fn schema_rejects_non_numeric_weight() {
+        let schema = spec_json_schema();
+        let compiled = JSONSchema::compile(&schema).unwrap();
+        let instance = json!({"file": [{"path": "a.txt", "weight": "heavy"}]});
+        assert!(!compiled.is_valid(&instance));
     }
 
     #[test]

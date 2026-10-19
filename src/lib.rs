@@ -3,6 +3,7 @@ mod directory_check;
 mod file_check;
 mod git_check;
 mod glob;
+mod path_guard;
 mod schema;
 
 pub use file_check::validate_file;
@@ -15,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Spec {
     /// Path to a parent spec to inherit from, resolved relative to the
     /// directory of the spec file that declares it. Only honored by
@@ -34,6 +36,7 @@ pub struct Spec {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileCheck {
     pub path: String,
     #[serde(default = "default_true")]
@@ -68,9 +71,14 @@ pub struct FileCheck {
     pub yaml_schema: Option<String>,
     #[serde(default)]
     pub check_references: bool,
+    /// Relative importance in weighted completion reporting; unweighted
+    /// checks count as 1.0.
+    #[serde(default)]
+    pub weight: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommandCheck {
     pub name: String,
     pub cmd: CommandSpec,
@@ -86,6 +94,10 @@ pub struct CommandCheck {
     pub stdout_contains: Vec<String>,
     #[serde(default)]
     pub stderr_contains: Vec<String>,
+    /// Relative importance in weighted completion reporting; unweighted
+    /// checks count as 1.0.
+    #[serde(default)]
+    pub weight: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -96,6 +108,7 @@ pub enum CommandSpec {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct GitCheck {
     #[serde(default)]
     pub no_uncommitted_changes: bool,
@@ -119,6 +132,7 @@ impl GitCheck {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct DirectoryCheck {
     pub path: String,
     #[serde(default = "default_true")]
@@ -129,6 +143,10 @@ pub struct DirectoryCheck {
     pub max_files: Option<usize>,
     #[serde(default)]
     pub forbid_empty: bool,
+    /// Relative importance in weighted completion reporting; unweighted
+    /// checks count as 1.0.
+    #[serde(default)]
+    pub weight: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,6 +162,10 @@ pub struct CheckResult {
     pub pass: bool,
     pub kind: String,
     pub message: String,
+    /// Declared weight from the spec, when the check sets one. Omitted from
+    /// serialized reports for unweighted checks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<f64>,
 }
 
 fn default_true() -> bool {
@@ -349,6 +371,7 @@ pub fn quick_check_files(paths: &[PathBuf], base: &Path) -> Vec<CheckResult> {
                 require_json_keys: Vec::new(),
                 yaml_schema: None,
                 check_references: false,
+                weight: None,
             };
             crate::file_check::validate_file(&check, base)
         })
@@ -381,6 +404,7 @@ mod tests {
             require_json_keys: Vec::new(),
             yaml_schema: None,
             check_references: false,
+            weight: None,
         }
     }
 

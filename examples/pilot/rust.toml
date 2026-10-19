@@ -1,0 +1,19 @@
+# Run only after reviewing this spec and passing --allow-commands.
+[[file]]
+path = "Cargo.toml"
+required = true
+require_toml_keys = ["package.name", "package.version"]
+
+[[file]]
+path = "Cargo.lock"
+required = true
+
+[[command]]
+name = "locked Rust tests"
+cmd = ["cargo", "test", "--locked"]
+timeout_secs = 300
+
+[[command]]
+name = "Rust formatting"
+cmd = ["cargo", "fmt", "--", "--check"]
+timeout_secs = 60

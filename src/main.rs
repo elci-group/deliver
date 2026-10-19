@@ -113,7 +113,7 @@ no_untracked_files = false
 
     println!("Created spec file: {}", output.display());
     println!("Edit it to define your validation checks, then run:");
-    println!("  deliver --spec {}", output.display());
+    println!("  deliver --spec {} --allow-commands", output.display());
 }
 
 fn handle_validate(spec_path: &std::path::Path) {
@@ -167,11 +167,13 @@ fn build_report(args: &Args) -> Result<deliver::Report, String> {
     if let Some(json) = &args.json {
         let spec = Spec::from_json(json)
             .map_err(|e| format!("failed to parse JSON spec: {}; check --json syntax", e))?;
+        require_command_trust(&spec, args.allow_commands)?;
         return Ok(spec.validate_with_jobs(&args.base, jobs));
     }
 
     if let Some(spec_path) = &args.spec {
         let spec = Spec::load_file(spec_path)?;
+        require_command_trust(&spec, args.allow_commands)?;
         return Ok(spec.validate_with_jobs(&args.base, jobs));
     }
 
@@ -191,4 +193,12 @@ fn build_report(args: &Args) -> Result<deliver::Report, String> {
     }
 
     Err("nothing to check. Provide --spec, --json, or --file.".to_string())
+}
+
+fn require_command_trust(spec: &Spec, allow_commands: bool) -> Result<(), String> {
+    if !allow_commands && !spec.commands.is_empty() {
+        Err("spec contains command checks; review the spec and its extends chain, then pass --allow-commands to execute them".to_string())
+    } else {
+        Ok(())
+    }
 }

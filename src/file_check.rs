@@ -6,8 +6,19 @@ use std::fs;
 use std::path::Path;
 
 pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
-    let path = base.join(&check.path);
     let name = format!("file: {}", check.path);
+    let path = match crate::path_guard::resolve(base, Path::new(&check.path)) {
+        Ok(path) => path,
+        Err(message) => {
+            return CheckResult {
+                name,
+                pass: false,
+                kind: "file".to_string(),
+                weight: check.weight,
+                message,
+            }
+        }
+    };
 
     if !path.exists() {
         return missing_file(check, name, &path);
@@ -15,12 +26,13 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
 
     // Check if path is a symlink
     if check.forbid_symlinks {
-        if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if let Ok(metadata) = fs::symlink_metadata(base.join(&check.path)) {
             if metadata.file_type().is_symlink() {
                 return CheckResult {
                     name,
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "path is a symlink: {}. Suggestion: disable forbid_symlinks or use the target file.",
                         path.display()
@@ -37,6 +49,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
                 name,
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!("cannot read metadata: {}", error),
             }
         }
@@ -47,6 +60,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
             name,
             pass: false,
             kind: "file".to_string(),
+            weight: check.weight,
             message: format!("path is a directory, not a file: {}", path.display()),
         };
     }
@@ -62,6 +76,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
                 name,
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!("cannot read file: {}", error),
             }
         }
@@ -112,6 +127,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
         name,
         pass: true,
         kind: "file".to_string(),
+        weight: check.weight,
         message: format!("OK ({} bytes)", metadata.len()),
     }
 }
@@ -122,6 +138,7 @@ fn missing_file(check: &FileCheck, name: String, path: &Path) -> CheckResult {
             name,
             pass: false,
             kind: "file".to_string(),
+            weight: check.weight,
             message: format!(
                 "required file does not exist: {}. Suggestion: create the file or remove this check.",
                 path.display()
@@ -132,6 +149,7 @@ fn missing_file(check: &FileCheck, name: String, path: &Path) -> CheckResult {
             name,
             pass: true,
             kind: "file".to_string(),
+            weight: check.weight,
             message: "optional file missing, ignored; set required=true if it must exist"
                 .to_string(),
         }
@@ -145,6 +163,7 @@ fn validate_size(check: &FileCheck, name: &str, size: u64) -> Option<CheckResult
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "size {} bytes exceeds max {} bytes. Suggestion: reduce file size or increase max_size_bytes.",
                     size, max
@@ -158,6 +177,7 @@ fn validate_size(check: &FileCheck, name: &str, size: u64) -> Option<CheckResult
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "size {} bytes is below min {} bytes. Suggestion: add more content or reduce min_size_bytes.",
                     size, min
@@ -187,6 +207,7 @@ fn validate_encoding(check: &FileCheck, name: &str, content: &str) -> Option<Che
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "file does not match encoding '{}'. Suggestion: convert file to {} encoding or adjust the encoding requirement.",
                     encoding, encoding
@@ -205,6 +226,7 @@ fn validate_hashes(check: &FileCheck, name: &str, path: &Path) -> Option<CheckRe
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!("cannot read file for hash verification: {}", error),
             });
         }
@@ -220,6 +242,7 @@ fn validate_hashes(check: &FileCheck, name: &str, path: &Path) -> Option<CheckRe
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "SHA-256 hash mismatch: expected {}, got {}. Suggestion: update the file or the expected hash.",
                     expected_sha256, actual_sha256
@@ -236,6 +259,7 @@ fn validate_hashes(check: &FileCheck, name: &str, path: &Path) -> Option<CheckRe
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "BLAKE3 hash mismatch: expected {}, got {}. Suggestion: update the file or the expected hash.",
                     expected_blake3, actual_blake3
@@ -257,6 +281,7 @@ fn validate_license_header(check: &FileCheck, name: &str, content: &str) -> Opti
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "file does not contain required license header '{}'. Suggestion: add the license header to the file or adjust the requirement.",
                     expected_header
@@ -277,6 +302,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "invalid JSON schema: {}. Suggestion: fix the schema syntax in the spec.",
                         error
@@ -293,6 +319,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "cannot compile JSON schema: {}. Suggestion: fix the schema structure.",
                         error
@@ -309,6 +336,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "file is not valid JSON: {}. Suggestion: fix the JSON syntax or remove json_schema check.",
                         error
@@ -327,6 +355,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "JSON schema validation failed: {}. Suggestion: fix the JSON structure to match the schema.",
                     error_messages.join("; ")
@@ -346,6 +375,7 @@ fn validate_toml_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "file is not valid TOML: {}. Suggestion: fix the TOML syntax or remove require_toml_keys check.",
                         error
@@ -366,6 +396,7 @@ fn validate_toml_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "TOML file missing required keys: {}. Suggestion: add these keys to the TOML file or remove them from require_toml_keys.",
                     missing_keys.join(", ")
@@ -404,6 +435,7 @@ fn validate_json_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "file is not valid JSON: {}. Suggestion: fix the JSON syntax or remove require_json_keys check.",
                         error
@@ -424,6 +456,7 @@ fn validate_json_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "JSON file missing required keys: {}. Suggestion: add these keys to the JSON file or remove them from require_json_keys.",
                     missing_keys.join(", ")
@@ -467,6 +500,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                             name: name.to_string(),
                             pass: false,
                             kind: "file".to_string(),
+                            weight: check.weight,
                             message: format!(
                                 "invalid YAML/JSON schema: {}. Suggestion: fix the schema syntax in the spec.",
                                 error
@@ -485,6 +519,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "cannot compile YAML schema: {}. Suggestion: fix the schema structure.",
                         error
@@ -501,6 +536,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "file is not valid YAML: {}. Suggestion: fix the YAML syntax or remove yaml_schema check.",
                         error
@@ -517,6 +553,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "cannot convert YAML to JSON: {}. Suggestion: check for unsupported YAML types.",
                         error
@@ -535,6 +572,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
+                weight: check.weight,
                 message: format!(
                     "YAML schema validation failed: {}. Suggestion: fix the YAML structure to match the schema.",
                     error_messages.join("; ")
@@ -631,6 +669,7 @@ fn validate_references(
             name: name.to_string(),
             pass: false,
             kind: "file".to_string(),
+            weight: check.weight,
             message: format!(
                 "file references missing files: {}. Suggestion: create the referenced files or remove the references.",
                 missing_refs.join(", ")
@@ -652,6 +691,7 @@ fn validate_line_count(check: &FileCheck, name: &str, content: &str) -> Option<C
         name: name.to_string(),
         pass: false,
         kind: "file".to_string(),
+        weight: check.weight,
         message: format!(
             "file has {} lines, required {}. Suggestion: add more lines or reduce require_line_count.",
             lines, min_lines
@@ -667,6 +707,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "content matches forbidden regex: '{}'. Suggestion: remove the matching content or adjust the regex.",
                         pattern
@@ -679,6 +720,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "invalid forbid regex '{}': {}. Suggestion: fix the regex syntax.",
                         pattern, error
@@ -695,6 +737,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "content does not match required regex: '{}'. Suggestion: add matching content or adjust the regex.",
                         pattern
@@ -707,6 +750,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
+                    weight: check.weight,
                     message: format!(
                         "invalid require regex '{}': {}. Suggestion: fix the regex syntax.",
                         pattern, error

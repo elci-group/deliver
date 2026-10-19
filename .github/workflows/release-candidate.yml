@@ -1,0 +1,67 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  candidate:
+    name: Candidate ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify runner target
+        shell: pwsh
+        run: |
+          $hostTriple = ((rustc -vV | Select-String '^host: ').ToString() -split ' ')[1]
+          if ($hostTriple -ne '${{ matrix.target }}') {
+            throw "Runner target $hostTriple does not match artifact target ${{ matrix.target }}"
+          }
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Package binary and checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          $source = if ($IsWindows) { 'target/release/deliver.exe' } else { 'target/release/deliver' }
+          $name = if ($IsWindows) { 'deliver-${{ matrix.target }}.exe' } else { 'deliver-${{ matrix.target }}' }
+          Copy-Item $source "dist/$name"
+          $hash = (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "dist/$name.sha256" -Value "$hash  $name" -Encoding utf8
+
+      - name: Attest candidate files
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*
+
+      - name: Upload candidate files
+        uses: actions/upload-artifact@v4
+        with:
+          name: deliver-${{ matrix.target }}-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error

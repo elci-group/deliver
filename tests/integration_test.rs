@@ -77,11 +77,69 @@ fn test_command_check() {
         &spec,
         r#"
 [[command]]
-name = "echo test"
-cmd = ["echo", "hello"]
+name = "rustc version"
+cmd = ["rustc", "--version"]
 expect_exit = 0
-stdout_contains = ["hello"]
+stdout_contains = ["rustc"]
 "#,
+    )
+    .unwrap();
+
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--allow-commands")
+        .arg("--base")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("PASS"));
+}
+
+#[test]
+fn failed_command_expectations_do_not_echo_expected_values() {
+    let dir = TempDir::new().unwrap();
+    let spec = dir.path().join("spec.toml");
+    let sentinel = "secret-sentinel-expected-output";
+    for field in ["stdout_contains", "stderr_contains"] {
+        fs::write(
+            &spec,
+            format!(
+                "[[command]]\nname = 'output check'\ncmd = ['rustc', '--version']\n{field} = ['{sentinel}']\n"
+            ),
+        )
+        .unwrap();
+
+        let output = Command::new(deliver_binary())
+            .arg("--spec")
+            .arg(&spec)
+            .arg("--allow-commands")
+            .arg("--base")
+            .arg(dir.path())
+            .arg("--format")
+            .arg("json")
+            .arg("--strict")
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(&format!("{field}[0]")));
+        assert!(!stdout.contains(sentinel));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn command_check_requires_explicit_trust_without_running_it() {
+    let dir = TempDir::new().unwrap();
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        "[[command]]\nname = 'marker'\ncmd = ['sh', '-c', 'touch marker.txt']\n",
     )
     .unwrap();
 
@@ -92,10 +150,89 @@ stdout_contains = ["hello"]
         .arg(dir.path())
         .output()
         .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--allow-commands"));
+    assert!(!dir.path().join("marker.txt").exists());
+}
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("PASS"));
+#[test]
+fn misspelled_spec_field_is_rejected() {
+    let dir = TempDir::new().unwrap();
+    let spec = dir.path().join("spec.toml");
+    fs::write(&spec, "[[file]]\npath = 'x.txt'\nrequried = false\n").unwrap();
+    let output = Command::new(deliver_binary())
+        .arg("validate")
+        .arg(&spec)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requried"));
+}
+
+#[test]
+fn external_json_schema_reference_is_rejected_without_fetching() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("data.json"), "{}").unwrap();
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        "[[file]]\npath = 'data.json'\njson_schema = '''{\"$ref\":\"http://127.0.0.1:9/external.json\"}'''\n",
+    )
+    .unwrap();
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--strict")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("resolve-http"));
+}
+
+#[test]
+fn file_check_rejects_parent_escape() {
+    let dir = TempDir::new().unwrap();
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        "[[file]]\npath = '../outside.txt'\nrequired = false\n",
+    )
+    .unwrap();
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--strict")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("path must stay inside --base"));
+}
+
+#[cfg(unix)]
+#[test]
+fn command_output_over_limit_fails() {
+    let dir = TempDir::new().unwrap();
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        "[[command]]\nname = 'noisy'\ncmd = ['sh', '-c', 'head -c 1048577 /dev/zero']\n",
+    )
+    .unwrap();
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--allow-commands")
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--strict")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("output exceeded"));
 }
 
 #[test]
@@ -294,6 +431,7 @@ max_size_bytes = 100
     assert!(stdout.contains("PASS"));
 }
 
+#[cfg(unix)]
 #[test]
 fn test_timeout_handling() {
     let dir = TempDir::new().unwrap();
@@ -314,6 +452,7 @@ timeout_secs = 1
     let output = Command::new(deliver_binary())
         .arg("--spec")
         .arg(&spec)
+        .arg("--allow-commands")
         .arg("--base")
         .arg(dir.path())
         .output()
@@ -372,6 +511,7 @@ fn test_init_command() {
 
     assert!(output.status.success());
     assert!(spec_path.exists());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--allow-commands"));
 
     let content = fs::read_to_string(&spec_path).unwrap();
     assert!(content.contains("File checks"));
@@ -479,6 +619,7 @@ encoding = "ascii"
     assert!(stdout.contains("PASS"));
 }
 
+#[cfg(unix)]
 #[cfg(unix)]
 #[test]
 fn test_symlink_detection() {
@@ -1219,4 +1360,161 @@ required = true
     assert!(stdout.contains("<failure"));
     assert!(stdout.contains("present.txt"));
     assert!(stdout.contains("missing.txt"));
+}
+
+#[test]
+fn test_weighted_checks_appear_in_json_output() {
+    let dir = TempDir::new().unwrap();
+    let test_file = dir.path().join("test.txt");
+    fs::write(&test_file, "hello world").unwrap();
+
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        r#"
+[[file]]
+path = "test.txt"
+required = true
+weight = 1.0
+
+[[command]]
+name = "rustc version"
+cmd = ["rustc", "--version"]
+expect_exit = 0
+weight = 4.0
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--allow-commands")
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("report is valid JSON");
+    let checks = report["checks"].as_array().unwrap();
+    assert_eq!(checks[0]["weight"], 1.0);
+    assert_eq!(checks[1]["weight"], 4.0);
+    assert!(stdout.contains("\"weight\": 4.0"));
+}
+
+#[test]
+fn test_unweighted_checks_omit_weight_in_json_output() {
+    let dir = TempDir::new().unwrap();
+    let test_file = dir.path().join("test.txt");
+    fs::write(&test_file, "hello world").unwrap();
+
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        r#"
+[[file]]
+path = "test.txt"
+required = true
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--format")
+        .arg("json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("report is valid JSON");
+    for check in report["checks"].as_array().unwrap() {
+        assert!(check.get("weight").is_none());
+    }
+    assert!(!stdout.contains("\"weight\""));
+}
+
+#[test]
+fn test_text_summary_reports_weighted_completion() {
+    let dir = TempDir::new().unwrap();
+    let test_file = dir.path().join("test.txt");
+    fs::write(&test_file, "hello world").unwrap();
+
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        r#"
+[[file]]
+path = "test.txt"
+required = true
+weight = 1.0
+
+[[command]]
+name = "rustc version"
+cmd = ["rustc", "--version"]
+expect_exit = 0
+weight = 4.0
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--allow-commands")
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--color")
+        .arg("never")
+        .arg("--progress")
+        .arg("never")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("complete by weight"));
+    assert!(stdout.contains("100% complete by weight"));
+}
+
+#[test]
+fn test_text_summary_omits_weighted_completion_without_weights() {
+    let dir = TempDir::new().unwrap();
+    let test_file = dir.path().join("test.txt");
+    fs::write(&test_file, "hello world").unwrap();
+
+    let spec = dir.path().join("spec.toml");
+    fs::write(
+        &spec,
+        r#"
+[[file]]
+path = "test.txt"
+required = true
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(deliver_binary())
+        .arg("--spec")
+        .arg(&spec)
+        .arg("--base")
+        .arg(dir.path())
+        .arg("--color")
+        .arg("never")
+        .arg("--progress")
+        .arg("never")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("complete by weight"));
 }

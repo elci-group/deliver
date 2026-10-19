@@ -1,9 +1,13 @@
 # Deliver: Roadmap to SOTA
 
-_Last assessed: 2026-09-24, against v0.2.0. Checkbox audit on 2026-09-24
+_Last assessed: 2026-09-24, against v0.3.0. Checkbox audit on 2026-09-24
 found several shipped features still unticked (git branch/commit-message
 validation, `--jobs`, SARIF, JUnit); boxes below now match the code, and
 `deliver.toml` greps the shipped markers so this drift alarms going forward._
+
+_India execution update, 2026-10-14: see [INDIA_MARKET_READINESS.md](INDIA_MARKET_READINESS.md)
+for the market gates and [INDIA_EXECUTION.md](INDIA_EXECUTION.md) for the current
+implementation state. Sections below retain their original assessment context._
 
 ## Current State Assessment
 
@@ -20,8 +24,8 @@ breadth (parallelism, richer output formats, extensibility), not repair.
   key presence, and cross-file reference checking for several languages
 - `init`/`validate`/`completions`/`schema` subcommands for spec authoring
 - Dual output formats (text + JSON), colored/plain and progress-aware
-- 50 tests (12 lib unit + property tests, 38 CLI-level integration tests),
-  all green; clippy clean with `-D warnings`; `cargo fmt` clean
+- 69 tests (24 unit tests including property tests, 45 CLI-level integration
+  tests), all green; clippy clean with `-D warnings`; `cargo fmt` clean
 - CI matrix across stable/beta/nightly, a separate release-build matrix
   (Linux/macOS/Windows), and a Criterion benchmark job
 
@@ -55,7 +59,7 @@ breadth (parallelism, richer output formats, extensibility), not repair.
   `[[directory]]` (singular). That key was silently ignored — `deliver init`
   generated a spec whose directory check never ran. Added `alias = "directory"`.
 
-## Shipped this pass: two new features
+## Shipped this pass: three new features
 
 **Spec composition (`extends`).** A spec can set `extends = "path.toml"`,
 resolved relative to the declaring file, to inherit from a parent spec. File/
@@ -71,12 +75,19 @@ spec format, so editors and agents can validate or autocomplete
 through `jsonschema` in tests to guarantee it stays a valid, compilable
 schema and actually accepts real specs.
 
+**Per-check weights.** Any `[[file]]`, `[[command]]`, or `[[directory]]`
+check may declare an optional numeric `weight` (unweighted checks count as
+`1.0`). Weights never affect pass/fail; they add a weighted completion
+percentage to the text summary and a `weight` field to JSON check results, so
+a spec can distinguish a nice-to-have docs check from a release-blocking test
+gate at a glance.
+
 ## Five Areas for Feature Improvement
 
 Prioritized by leverage for `deliver`'s actual audience — agents and CI,
 where determinism and speed matter more than breadth of integrations.
 
-1. **Performance & scale.** Checks run strictly sequentially today; on a
+1. **Performance & scale.** Checks ran strictly sequentially at this assessment; on a
    spec with many independent command checks (the slowest kind — each pays
    process spawn + full timeout budget) that's wasted wall-clock. Parallel
    execution (rayon or a thread pool, capped by a `--jobs` flag), keeping the
@@ -142,7 +153,7 @@ _agents that need deterministic proof_.
 - [x] `deliver validate` to check spec syntax
 - [x] Shell completions (bash, zsh, fish)
 - [x] Error messages with suggestions
-- [x] Integration test suite (38 tests)
+- [x] Integration test suite (45 tests)
 - [x] Property-based tests with proptest
 - [x] CI/CD pipeline (GitHub Actions) — now actually triggers on `master`
 - [x] Pre-commit hook integration — manifest format fixed
@@ -161,6 +172,7 @@ _agents that need deterministic proof_.
 - [x] License header validation
 - [x] Cross-file reference validation (Rust/Python/JS/TS/C/C++)
 - [x] TOML/JSON key-path queries
+- [x] Per-check weights with weighted completion reporting
 - [x] Git commit message validation
 - [x] Git branch validation
 - [ ] Conditional checks (`when`)

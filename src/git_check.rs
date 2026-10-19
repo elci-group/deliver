@@ -34,6 +34,7 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
                 name,
                 pass: false,
                 kind: "git".to_string(),
+                weight: None,
                 message: format!(
                     "invalid require_branch_regex '{}': {}. Suggestion: fix the regex syntax.",
                     pattern, error
@@ -56,6 +57,7 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
                 name,
                 pass: false,
                 kind: "git".to_string(),
+                weight: None,
                 message: "could not determine current branch. Suggestion: ensure --base is inside a Git repository with at least one commit.".to_string(),
             }
         }
@@ -66,6 +68,7 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
         name,
         pass,
         kind: "git".to_string(),
+        weight: None,
         message: if pass {
             format!("branch '{}' matches '{}'", branch, pattern)
         } else {
@@ -82,6 +85,7 @@ fn invalid_commit_message_regex(name: String, pattern: &str, error: regex::Error
         name,
         pass: false,
         kind: "git".to_string(),
+        weight: None,
         message: format!(
             "invalid require_commit_message_regex '{}': {}. Suggestion: fix the regex syntax.",
             pattern, error
@@ -110,6 +114,7 @@ fn validate_commit_message(base: &Path, pattern: &str) -> CheckResult {
                 name,
                 pass: false,
                 kind: "git".to_string(),
+                weight: None,
                 message: "could not read the last commit message. Suggestion: ensure --base is inside a Git repository with at least one commit.".to_string(),
             }
         }
@@ -120,6 +125,7 @@ fn validate_commit_message(base: &Path, pattern: &str) -> CheckResult {
         name,
         pass,
         kind: "git".to_string(),
+        weight: None,
         message: if pass {
             format!("commit message matches '{}'", pattern)
         } else {
@@ -144,6 +150,7 @@ fn validate_no_uncommitted_changes(base: &Path) -> CheckResult {
         name: "git: no uncommitted changes".to_string(),
         pass,
         kind: "git".to_string(),
+        weight: None,
         message: if pass {
             "working tree clean".to_string()
         } else {
@@ -166,6 +173,7 @@ fn validate_no_untracked_files(base: &Path) -> CheckResult {
         name: "git: no untracked files".to_string(),
         pass,
         kind: "git".to_string(),
+        weight: None,
         message: if pass {
             "no untracked files".to_string()
         } else {

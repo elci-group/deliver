@@ -10,7 +10,7 @@ report out.
 ## Quick Start
 
 ```bash
-deliver --spec deliver.toml --strict
+deliver --spec deliver.toml --allow-commands --strict
 deliver --file README.md src/*.rs
 deliver --json '{"files":[{"path":"README.md"}]}' --format json
 ```
@@ -18,9 +18,20 @@ deliver --json '{"files":[{"path":"README.md"}]}' --format json
 Use `--base DIR` when the spec should resolve relative paths somewhere other
 than the current directory.
 
+Specs containing `[[command]]` checks require `--allow-commands`. Review the
+spec and its full `extends` chain first: commands run with the current user's
+privileges and inherited environment. Specs without command checks run without
+this flag. A `deliver.toml` from a pull request or agent should be treated as
+executable code, not as trusted configuration.
+
+For a pilot, start from the [example specs](examples/pilot/README.md) and
+adapt them to the repository under test.
+Candidate build and verification steps are in the
+[release candidate procedure](RELEASE_CANDIDATE.md).
+
 ## Commands
 
-Besides the default validation run, `deliver` has three subcommands:
+Besides the default validation run, `deliver` has four subcommands:
 
 ```bash
 deliver init                       # scaffold a starter deliver.toml
@@ -29,6 +40,9 @@ deliver validate deliver.toml      # check spec syntax without running checks
 deliver completions bash           # print shell completions (bash|zsh|fish)
 deliver schema                     # print the spec format as JSON Schema
 ```
+
+The starter spec from `deliver init` includes a command check, so its printed
+run command includes `--allow-commands`.
 
 `deliver validate` resolves the spec's full `extends` chain (see below), parses
 it (TOML or JSON, detected from the file extension), and reports an error
@@ -44,9 +58,9 @@ for editors and agents to validate or autocomplete a `deliver.toml`/
 Text output is designed for terminals and CI logs:
 
 ```bash
-deliver --spec deliver.toml
-deliver --spec deliver.toml --color always
-deliver --spec deliver.toml --color never --progress never
+deliver --spec deliver.toml --allow-commands
+deliver --spec deliver.toml --allow-commands --color always
+deliver --spec deliver.toml --allow-commands --color never --progress never
 ```
 
 `--color auto` enables ANSI color only when stdout is a terminal. `--progress
@@ -54,7 +68,7 @@ auto` shows a small spinner on stderr for text output in an interactive
 terminal. JSON output remains stable and does not include ANSI styling.
 
 ```bash
-deliver --spec deliver.toml --format json
+deliver --spec deliver.toml --allow-commands --format json
 ```
 
 `--format sarif` emits SARIF 2.1.0 (only failed checks become `results`, for
@@ -63,8 +77,8 @@ junit` emits JUnit XML (every check becomes a `<testcase>`, failing ones
 carry a `<failure>` child) for CI test-result dashboards.
 
 ```bash
-deliver --spec deliver.toml --format sarif
-deliver --spec deliver.toml --format junit
+deliver --spec deliver.toml --allow-commands --format sarif
+deliver --spec deliver.toml --allow-commands --format junit
 ```
 
 ## Parallel Execution
@@ -76,7 +90,7 @@ available CPUs. The report's check order is always spec order regardless of
 `--jobs`, so output stays deterministic even though execution isn't.
 
 ```bash
-deliver --spec deliver.toml --jobs 4
+deliver --spec deliver.toml --allow-commands --jobs 4
 ```
 
 Command checks that share mutable state (for example, several `cargo`
@@ -148,8 +162,47 @@ Prefer the array form for reproducible behavior. Commands run from `--base`
 joined with the check's `cwd`, inherit the current environment, and may add or
 override environment variables through `env`.
 
-Timeouts are enforced while stdout and stderr are captured, so a noisy command
-cannot block the validator indefinitely.
+Timeouts are enforced while stdout and stderr are captured. Each stream is
+limited to 1 MiB; exceeding that limit fails the check. On Unix, a timed-out
+command's process group is killed. On Windows, the direct child is killed;
+descendant cleanup needs a job-object implementation before claiming full
+process-tree containment. A check also fails if its output pipes remain open
+more than one second after the direct child exits. `--allow-commands` is an execution consent flag,
+not a sandbox. Run untrusted repositories in an isolated, low-privilege CI job.
+
+File and directory paths and command working directories must stay beneath
+`--base`, including through symlinks. Unknown spec fields now cause a parse
+error, preventing a misspelled requirement from being silently skipped.
+JSON Schema checks reject external HTTP and file references; their schemas
+must be self-contained. Command checks may still access the network.
+
+### Check Weights
+
+Any `[[file]]`, `[[command]]`, or `[[directory]]` check may set an optional
+`weight` — a number declaring its relative importance, defaulting to `1.0`.
+Weights never change pass/fail; they feed the weighted completion figure
+appended to the text summary and the `weight` field in JSON reports (omitted
+for unweighted checks):
+
+```toml
+[[command]]
+name = "cargo test"
+cmd = ["cargo", "test"]
+weight = 4.0
+
+[[file]]
+path = "README.md"
+required = true
+weight = 1.0
+```
+
+When at least one check carries a weight, the text summary gains a weighted
+completion percentage, computed as passing weight over total weight, with
+unweighted checks counting as `1.0`. For example:
+
+`14 checks: 9 passed, 5 failed in 120 ms · 64% complete by weight`
+
+Specs where no check sets a weight keep the plain summary line.
 
 ### Git Checks
 

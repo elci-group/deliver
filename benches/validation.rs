@@ -30,6 +30,7 @@ fn make_file_check(path: &str) -> FileCheck {
         require_json_keys: Vec::new(),
         yaml_schema: None,
         check_references: false,
+        weight: None,
     }
 }
 

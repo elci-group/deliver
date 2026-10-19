@@ -1,0 +1,22 @@
+# Example layout: backend/ is a Rust crate; frontend/ is a Node project.
+# Adapt checks to a real pilot repository before allowing commands.
+[[file]]
+path = "backend/Cargo.toml"
+required = true
+
+[[file]]
+path = "frontend/package.json"
+required = true
+require_json_keys = ["scripts.build"]
+
+[[command]]
+name = "backend tests"
+cmd = ["cargo", "test", "--locked"]
+cwd = "backend"
+timeout_secs = 300
+
+[[command]]
+name = "frontend build"
+cmd = ["npm", "run", "build"]
+cwd = "frontend"
+timeout_secs = 300

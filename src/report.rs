@@ -1,5 +1,5 @@
 use crate::cli::{ColorMode, OutputFormat, ProgressMode};
-use deliver::Report;
+use deliver::{CheckResult, Report};
 use std::io::{self, IsTerminal, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -92,9 +92,43 @@ impl Progress {
     }
 }
 
+/// Percentage (0..=100) of the total check weight carried by passing
+/// checks, or `None` when no check declares a weight. Checks without a
+/// weight count as 1.0, so mixed specs blend weighted and unweighted
+/// checks. A spec whose weights sum to zero reports 0%.
+fn weighted_completion_pct(report: &Report) -> Option<f64> {
+    if !report.checks.iter().any(|check| check.weight.is_some()) {
+        return None;
+    }
+    let weight_of = |check: &CheckResult| check.weight.unwrap_or(1.0);
+    let total: f64 = report.checks.iter().map(weight_of).sum();
+    let passed: f64 = report
+        .checks
+        .iter()
+        .filter(|check| check.pass)
+        .map(weight_of)
+        .sum();
+    Some(if total > 0.0 {
+        passed / total * 100.0
+    } else {
+        0.0
+    })
+}
+
 pub fn render_text(report: &Report, style: &TextStyle) {
     let passed = report.checks.iter().filter(|check| check.pass).count();
     let failed = report.checks.len().saturating_sub(passed);
+
+    let mut summary = format!(
+        "{} checks: {} passed, {} failed in {} ms",
+        report.checks.len(),
+        passed,
+        failed,
+        report.duration_ms
+    );
+    if let Some(pct) = weighted_completion_pct(report) {
+        summary = format!("{} · {:.0}% complete by weight", summary, pct);
+    }
 
     println!(
         "{}",
@@ -107,19 +141,7 @@ pub fn render_text(report: &Report, style: &TextStyle) {
             }
         )
     );
-    println!(
-        "{}",
-        style.paint(
-            DIM,
-            format!(
-                "{} checks: {} passed, {} failed in {} ms",
-                report.checks.len(),
-                passed,
-                failed,
-                report.duration_ms
-            )
-        )
-    );
+    println!("{}", style.paint(DIM, summary));
     println!();
 
     for check in &report.checks {
@@ -226,7 +248,6 @@ fn json_string(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use deliver::CheckResult;
 
     fn sample_report(pass: bool) -> Report {
         Report {
@@ -237,12 +258,14 @@ mod tests {
                     name: "file: README.md".to_string(),
                     pass: true,
                     kind: "file".to_string(),
+                    weight: None,
                     message: "OK (10 bytes)".to_string(),
                 },
                 CheckResult {
                     name: "cargo test".to_string(),
                     pass,
                     kind: "command".to_string(),
+                    weight: None,
                     message: if pass {
                         "OK".to_string()
                     } else {
@@ -287,5 +310,54 @@ mod tests {
         let xml = render_junit(&report);
         assert!(xml.contains("tests=\"2\" failures=\"0\""));
         assert!(!xml.contains("<failure"));
+    }
+
+    fn report_with_weights(weights: &[Option<f64>], pass: bool) -> Report {
+        Report {
+            pass,
+            duration_ms: 1,
+            checks: weights
+                .iter()
+                .enumerate()
+                .map(|(i, weight)| CheckResult {
+                    name: format!("check {i}"),
+                    pass,
+                    kind: "file".to_string(),
+                    message: "m".to_string(),
+                    weight: *weight,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn weighted_completion_is_none_when_no_check_has_weight() {
+        assert_eq!(weighted_completion_pct(&sample_report(true)), None);
+    }
+
+    #[test]
+    fn weighted_completion_all_pass_is_100() {
+        let report = report_with_weights(&[Some(1.0), Some(4.0)], true);
+        assert_eq!(weighted_completion_pct(&report), Some(100.0));
+    }
+
+    #[test]
+    fn weighted_completion_all_fail_is_0() {
+        let report = report_with_weights(&[Some(1.0), Some(4.0)], false);
+        assert_eq!(weighted_completion_pct(&report), Some(0.0));
+    }
+
+    #[test]
+    fn weighted_completion_counts_unweighted_checks_as_one() {
+        let mut report = report_with_weights(&[Some(3.0), None], true);
+        report.checks[1].pass = false;
+        report.pass = false;
+        assert_eq!(weighted_completion_pct(&report), Some(75.0));
+    }
+
+    #[test]
+    fn weighted_completion_zero_total_weight_is_0() {
+        let report = report_with_weights(&[Some(0.0)], true);
+        assert_eq!(weighted_completion_pct(&report), Some(0.0));
     }
 }

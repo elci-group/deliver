@@ -1,0 +1,10 @@
+# Read-only pilot gate: works without --allow-commands.
+[[file]]
+path = "README.md"
+required = true
+min_size_bytes = 100
+
+[[directory]]
+path = "src"
+required = true
+forbid_empty = true

@@ -1,6 +1,7 @@
 # Benchmarks
 
-This document records reproducible performance measurements for `deliver`.
+This document records historical performance measurements for `deliver`
+v0.1.2. They have not been re-run against the current v0.3.0 working tree.
 The goal is to show that `deliver` is fast enough to run on every commit,
 scalable enough for large projects, and materially faster than the ad-hoc
 shell scripts it replaces.
@@ -114,5 +115,5 @@ cargo bench
 - Times are Criterion mean estimates.
 - The shell benchmark is intentionally simple (`test -f`, `grep -q`) to match
   what a team might cobble together before adopting `deliver`.
-- Benchmarks are executed serially; `deliver` itself currently runs checks
-  sequentially, so these numbers represent current behavior, not a ceiling.
+- Benchmarks were executed serially. They predate `--jobs` and cannot be used
+  to estimate the current parallel-check performance.

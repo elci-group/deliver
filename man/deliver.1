@@ -1,4 +1,4 @@
-.TH DELIVER 1 "August 2026" "deliver 0.2.0" "User Commands"
+.TH DELIVER 1 "September 2026" "deliver 0.3.0" "User Commands"
 .SH NAME
 deliver \- deterministic deliverable validator for agent workflows
 .SH SYNOPSIS
@@ -11,6 +11,7 @@ deliver \- deterministic deliverable validator for agent workflows
 [\fB--color\fR \fIauto|always|never\fR]
 [\fB--progress\fR \fIauto|always|never\fR]
 [\fB--strict\fR]
+[\fB--allow-commands\fR]
 [\fB--jobs\fR \fIN\fR]
 .br
 .B deliver
@@ -59,7 +60,14 @@ expanded recursively below \fB--base\fR.
 .TP
 .B -b, --base \fIDIR\fR
 Resolve relative file paths and command working directories from \fIDIR\fR.
-Defaults to the current directory.
+Defaults to the current directory. Spec-selected paths may not escape this
+directory, including through symlinks.
+.TP
+.B --allow-commands
+Run command checks after reviewing the spec and its full extends chain.
+Commands inherit the runner's privileges and environment. Without this flag,
+specs containing command checks fail before any checks run. This is not a
+sandbox; isolate untrusted repositories in CI.
 .TP
 .B -f, --format \fItext|json|sarif|junit\fR
 Select the report format. Text is for people; JSON is for generic tools;
@@ -94,13 +102,13 @@ At least one validation check failed and \fB--strict\fR was set.
 The command could not read or parse its inputs, or no checks were provided.
 .SH EXAMPLES
 .TP
-.B deliver --spec deliver.toml --strict
+.B deliver --spec deliver.toml --allow-commands --strict
 Run the project validation spec and fail the process on any failed check.
 .TP
 .B deliver --file README.md src/*.rs --color always
 Check files directly and force colored text output.
 .TP
-.B deliver --spec deliver.toml --format json
+.B deliver --spec deliver.toml --allow-commands --format json
 Emit a stable JSON report for another tool.
 .TP
 .B deliver init && deliver validate deliver.toml

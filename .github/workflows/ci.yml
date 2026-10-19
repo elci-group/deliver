@@ -86,6 +86,20 @@ jobs:
           target/release/deliver
           target/release/deliver.exe
 
+  platform-test:
+    name: Platform tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+    - name: Run all tests
+      run: cargo test --verbose
+
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest

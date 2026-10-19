@@ -44,6 +44,11 @@ pub struct Args {
     #[arg(long)]
     pub strict: bool,
 
+    /// Permit command checks from a trusted spec. Commands run with this
+    /// process's privileges and inherited environment.
+    #[arg(long)]
+    pub allow_commands: bool,
+
     /// Run file/command/directory checks with up to this many worker
     /// threads (git checks always run sequentially, after). Default 1
     /// (sequential); pass e.g. 4 or 0 (all CPUs) to speed up specs with many

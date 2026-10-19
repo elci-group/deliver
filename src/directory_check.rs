@@ -3,8 +3,19 @@ use std::fs;
 use std::path::Path;
 
 pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
-    let path = base.join(&check.path);
     let name = format!("directory: {}", check.path);
+    let path = match crate::path_guard::resolve(base, Path::new(&check.path)) {
+        Ok(path) => path,
+        Err(message) => {
+            return CheckResult {
+                name,
+                pass: false,
+                kind: "directory".to_string(),
+                weight: check.weight,
+                message,
+            }
+        }
+    };
 
     if !path.exists() {
         return missing_directory(check, name, &path);
@@ -17,6 +28,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
                 name,
                 pass: false,
                 kind: "directory".to_string(),
+                weight: check.weight,
                 message: format!("cannot read metadata: {}", error),
             }
         }
@@ -27,6 +39,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
             name,
             pass: false,
             kind: "directory".to_string(),
+            weight: check.weight,
             message: format!("path is a file, not a directory: {}", path.display()),
         };
     }
@@ -38,6 +51,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
                 name,
                 pass: false,
                 kind: "directory".to_string(),
+                weight: check.weight,
                 message: format!("cannot count files: {}", error),
             }
         }
@@ -52,6 +66,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
             name,
             pass: false,
             kind: "directory".to_string(),
+            weight: check.weight,
             message: "directory is empty. Suggestion: add files or disable forbid_empty."
                 .to_string(),
         };
@@ -61,6 +76,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
         name,
         pass: true,
         kind: "directory".to_string(),
+        weight: check.weight,
         message: format!("OK ({} files)", file_count),
     }
 }
@@ -71,6 +87,7 @@ fn missing_directory(check: &DirectoryCheck, name: String, path: &Path) -> Check
             name,
             pass: false,
             kind: "directory".to_string(),
+            weight: check.weight,
             message: format!(
                 "required directory does not exist: {}. Suggestion: create the directory or remove this check.",
                 path.display()
@@ -81,6 +98,7 @@ fn missing_directory(check: &DirectoryCheck, name: String, path: &Path) -> Check
             name,
             pass: true,
             kind: "directory".to_string(),
+            weight: check.weight,
             message: "optional directory missing, ignored; set required=true if it must exist"
                 .to_string(),
         }
@@ -94,6 +112,7 @@ fn validate_file_count(check: &DirectoryCheck, name: &str, count: usize) -> Opti
                 name: name.to_string(),
                 pass: false,
                 kind: "directory".to_string(),
+                weight: check.weight,
                 message: format!(
                     "directory has {} files, exceeds max {}. Suggestion: remove files or increase max_files.",
                     count, max
@@ -107,6 +126,7 @@ fn validate_file_count(check: &DirectoryCheck, name: &str, count: usize) -> Opti
                 name: name.to_string(),
                 pass: false,
                 kind: "directory".to_string(),
+                weight: check.weight,
                 message: format!(
                     "directory has {} files, below min {}. Suggestion: add files or reduce min_files.",
                     count, min

@@ -18,6 +18,7 @@ required = true
 min_size_bytes = 1200
 require_regex = [
   "deliver --spec",
+  "--allow-commands",
   "Output Modes",
   "Spec Reference",
   "deliver init",
@@ -28,6 +29,9 @@ require_regex = [
   "--jobs",
   "format sarif",
   "format junit",
+  "Check Weights",
+  "weight = 4.0",
+  "complete by weight",
 ]
 
 [[file]]
@@ -60,6 +64,7 @@ require_regex = [
   "\\[x\\] Parallel check execution \\(`--jobs`\\)",
   "\\[x\\] SARIF 2\\.1\\.0 output",
   "\\[x\\] JUnit XML output",
+  "\\[x\\] Per-check weights",
 ]
 
 [[command]]
