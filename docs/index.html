@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deliver — deterministic deliverable validator</title>
+<meta name="description" content="Documentation for deliver, a local CLI that runs a versioned acceptance spec and reports which checks passed — deterministic proof for agent workflows.">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="mast"><div class="mast-inner">
+<p class="eyebrow">deliver · v1.0 documentation</p>
+<h1>deliver</h1>
+<p class="lede">A local CLI that runs a versioned acceptance spec and reports
+which checks passed. Built for agents and CI that need deterministic proof
+that expected deliverables exist and that quality gates still pass — with no
+network, no daemon, and no source code leaving the machine.</p>
+<nav class="toc" aria-label="Page contents">
+<a href="#quickstart">Quick start</a>
+<a href="#checks">Checks</a>
+<a href="#when">Conditional checks</a>
+<a href="#weights">Weights</a>
+<a href="#extends">Extends</a>
+<a href="#plugins">Plugins</a>
+<a href="#sbom">SBOM</a>
+<a href="#outputs">Output formats</a>
+<a href="#performance">Performance</a>
+<a href="#attest">Attestations</a>
+<a href="#trust">Trust model</a>
+<a href="#api">Library API</a>
+<a href="#releases">Releases</a>
+</nav>
+</div></header>
+
+<main id="main">
+
+<section id="quickstart" aria-labelledby="quickstart-h">
+<h2 id="quickstart-h">Quick start</h2>
+<pre><code>deliver init                    # scaffold deliver.toml
+deliver validate deliver.toml   # parse check, no runs
+deliver --spec deliver.toml --allow-commands --strict</code></pre>
+<p>A spec is TOML or JSON. A run prints a report — <code>deliver report:
+PASS</code> or <code>FAIL</code> — one row per check. With
+<code>--strict</code>, a failing run exits <code>1</code>; usage and parse
+errors exit <code>2</code>. Without <code>--strict</code> the exit code is
+always <code>0</code> and the report carries the outcome.</p>
+</section>
+
+<section id="checks" aria-labelledby="checks-h">
+<h2 id="checks-h">Checks</h2>
+<h3>File checks <code>[[file]]</code></h3>
+<p>Paths are relative to <code>--base</code> and may not escape it,
+including through symlinks.</p>
+<table>
+<thead><tr><th>Field</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>required</code></td><td>Fail when absent (default true; <code>false</code> makes absence a pass)</td></tr>
+<tr><td><code>min_size_bytes</code> / <code>max_size_bytes</code></td><td>Size bounds in bytes</td></tr>
+<tr><td><code>forbid_regex</code> / <code>require_regex</code></td><td>Forbidden / required content patterns</td></tr>
+<tr><td><code>require_line_count</code></td><td>Minimum line count</td></tr>
+<tr><td><code>encoding</code></td><td><code>utf-8</code>, <code>utf8</code>, or <code>ascii</code></td></tr>
+<tr><td><code>forbid_symlinks</code></td><td>Fail when the path is a symlink</td></tr>
+<tr><td><code>sha256</code> / <code>blake3</code></td><td>Exact content hash pinning</td></tr>
+<tr><td><code>require_license_header</code></td><td>Substring required in the first ten lines</td></tr>
+<tr><td><code>json_schema</code> / <code>yaml_schema</code></td><td>Validate parsed content against an embedded schema (self-contained only)</td></tr>
+<tr><td><code>require_toml_keys</code> / <code>require_json_keys</code></td><td>Dotted key paths that must exist</td></tr>
+<tr><td><code>check_references</code></td><td>For Rust/Python/JS/TS/C/C++: local imports must resolve</td></tr>
+<tr><td><code>forbid_secrets</code></td><td>Built-in high-confidence secret patterns (AWS keys, provider tokens, private key blocks, …); reports name the pattern and line, never the matched content</td></tr>
+<tr><td><code>weight</code>, <code>when</code></td><td>Shared fields — see <a href="#weights">weights</a> and <a href="#when">conditions</a></td></tr>
+</tbody>
+</table>
+<h3>Command checks <code>[[command]]</code></h3>
+<p>Run a program from a working directory under <code>--base</code>.
+<code>cmd</code> takes an argument array (preferred) or a whitespace-split
+string; validate with <code>expect_exit</code>,
+<code>stdout_contains</code>, <code>stderr_contains</code>; bound it with
+<code>timeout_secs</code> (default 300; on Unix the whole process group is
+killed). Output is capped at 1 MiB per stream. Requires
+<code>--allow-commands</code>.</p>
+<h3>Directory checks <code>[[directory]]</code></h3>
+<p><code>required</code>, <code>min_files</code> / <code>max_files</code>
+(regular files directly inside, non-recursive), <code>forbid_empty</code>.</p>
+<h3>Git checks <code>[git]</code></h3>
+<p>Run last, sequentially, in <code>--base</code>:
+<code>no_uncommitted_changes</code>, <code>no_untracked_files</code>,
+<code>require_branch_regex</code>, <code>require_commit_message_regex</code>.</p>
+</section>
+
+<section id="when" aria-labelledby="when-h">
+<h2 id="when-h">Conditional checks (<code>when</code>)</h2>
+<p>Any file, command, directory, or plugin check may declare skip
+conditions. When a condition does not hold, the check is <em>skipped</em>,
+not failed: it reports <code>pass = true</code> with a <code>skipped</code>
+flag, never fails the run, and is excluded from weighted completion.</p>
+<pre><code>[[file]]
+path = "Cargo.lock"
+when = { file_exists = "Cargo.toml", os = "linux" }</code></pre>
+<p><code>file_exists</code> is a base-relative path;
+<code>os</code> is <code>linux</code>, <code>macos</code>, or
+<code>windows</code> (case-insensitive). Conditions combine with AND. This
+is how a shared base policy carries Cargo-specific checks that only activate
+in Rust repositories.</p>
+</section>
+
+<section id="weights" aria-labelledby="weights-h">
+<h2 id="weights-h">Weights</h2>
+<p>Any check may declare <code>weight</code> (default 1.0). Weights never
+change pass/fail; when at least one check has a weight, the summary gains a
+weighted completion percentage:</p>
+<pre><code>14 checks: 9 passed, 5 failed in 120 ms · 64% complete by weight</code></pre>
+</section>
+
+<section id="extends" aria-labelledby="extends-h">
+<h2 id="extends-h">Spec composition (<code>extends</code>)</h2>
+<pre><code>extends = "../policies/rust-lib.toml"</code></pre>
+<p>Resolved relative to the declaring spec. Checks accumulate (parent
+first); git flags combine with OR, so a child can only add requirements.
+Circular chains are rejected. <code>extends</code> is only honored when
+loading from a file (<code>--spec</code> / <code>deliver validate</code>).</p>
+</section>
+
+<section id="plugins" aria-labelledby="plugins-h">
+<h2 id="plugins-h">Plugin checks (<code>[[plugin]]</code>, protocol v1)</h2>
+<p>The extension point for organization-specific checks. The runner spawns
+your program, writes one JSON request line to stdin, closes it, and expects
+one JSON response on stdout with exit 0:</p>
+<pre><code>request:  {"protocol": 1, "name": "org gate", "base": "/abs/path"}
+response: {"pass": true, "message": "all good"}</code></pre>
+<p><code>pass</code> (boolean) is required; <code>message</code> is
+optional; extra fields are ignored. A nonzero exit, unparseable stdout, a
+missing <code>pass</code>, or output over 1 MiB per stream fails the check
+with the plugin's stderr quoted (truncated to 500 chars). Plugins support
+<code>cwd</code>, <code>timeout_secs</code> (process-group kill on Unix),
+<code>weight</code>, and <code>when</code>, run in the parallel pool, and
+accumulate across <code>extends</code>. A runnable example lives in
+<code>examples/plugin/</code>.</p>
+</section>
+
+<section id="sbom" aria-labelledby="sbom-h">
+<h2 id="sbom-h">SBOM gate (<code>[sbom]</code>)</h2>
+<pre><code>[sbom]
+required = true
+formats = ["spdx", "cyclonedx"]   # empty = any supported</code></pre>
+<p>Searches <code>*.spdx</code>, <code>*.spdx.json</code>,
+<code>*.cdx.json</code>, and <code>bom.json</code> under <code>--base</code>
+for SPDX (JSON or tag-value) or CycloneDX documents with their core fields
+present. Detection is deliberately shallow: the gate proves a well-formed
+SBOM exists, not that its contents are accurate.</p>
+</section>
+
+<section id="outputs" aria-labelledby="outputs-h">
+<h2 id="outputs-h">Output formats</h2>
+<dl>
+<dt><code>text</code> (default)</dt><dd>Terminal report with suggestions on failure.</dd>
+<dt><code>json</code></dt><dd>Stable single-object report; check objects carry <code>name</code>, <code>pass</code>, <code>kind</code>, <code>message</code>, optional <code>weight</code>, optional <code>skipped</code>.</dd>
+<dt><code>sarif</code></dt><dd>SARIF 2.1.0; failed checks only, for GitHub code scanning.</dd>
+<dt><code>junit</code></dt><dd>JUnit XML; every check is a testcase, failures carry <code>&lt;failure&gt;</code>, skips carry <code>&lt;skipped/&gt;</code>.</dd>
+<dt><code>ndjson</code></dt><dd>One <code>{"type":"check",…}</code> line the moment each check finishes, then a <code>{"type":"summary",…}</code> line — for watchers that react to partial progress. Spec order with <code>--jobs 1</code>, completion order otherwise.</dd>
+<dt><code>github</code></dt><dd>GitHub Actions workflow commands: failing checks become <code>::error</code> annotations, plus one <code>::notice</code> summary.</dd>
+</dl>
+<p>Subcommands: <code>init</code>, <code>validate</code>,
+<code>completions</code>, <code>schema</code> (JSON Schema draft-07 for the
+spec format, for editor support), <code>keygen</code>, and
+<code>attest verify</code>.</p>
+</section>
+
+<section id="performance" aria-labelledby="performance-h">
+<h2 id="performance-h">Performance</h2>
+<dl>
+<dt><code>--jobs N</code></dt><dd>Parallel check execution; <code>0</code> uses all CPUs. Report order is always spec order.</dd>
+<dt><code>--cache-dir DIR</code></dt><dd>Content-hash result cache: file checks replay for identical content, keyed by deliver version + full check definition, always marked <code>(cached)</code>. Never a gate.</dd>
+<dt><code>--incremental</code></dt><dd>Git-diff-aware: files unchanged since HEAD replay their HEAD-pinned results without being re-read. Requires a git repository with a commit; implies the default cache dir (<code>$XDG_CACHE_HOME/deliver</code>).</dd>
+<dt><code>--fail-fast</code></dt><dd>Stop after the first failure; remaining checks are reported as skipped.</dd>
+</dl>
+</section>
+
+<section id="attest" aria-labelledby="attest-h">
+<h2 id="attest-h">Attestations</h2>
+<pre><code>deliver keygen --out keys        # keys.key (0600) + keys.pub
+deliver --spec deliver.toml --allow-commands \
+    --attest bundle.json --attest-key keys.key
+deliver attest verify bundle.json --pub keys.pub</code></pre>
+<p><code>--attest</code> writes a bundle only after a <em>passing</em> run:
+spec hash, report hash and tallies, git commit, UTC timestamp, and an Ed25519
+signature over the canonical payload. Verification always checks payload
+integrity; <code>--pub</code> additionally authenticates the signer.
+Verification proves the bundle is intact and who signed it — it does not
+re-run the checks.</p>
+</section>
+
+<section id="trust" aria-labelledby="trust-h">
+<h2 id="trust-h">Trust model</h2>
+<p><code>--allow-commands</code> (required for command and plugin checks) is
+an execution consent flag, <strong>not a sandbox</strong>: commands and
+plugins inherit the runner's privileges, environment, and network. Review
+the spec and its full <code>extends</code> chain before passing it; run
+untrusted repositories only in isolated, low-privilege CI jobs. Spec parsing
+is fail-closed (unknown fields are errors), check paths cannot escape
+<code>--base</code>, failed command checks never echo expected output
+values, and secret findings never echo matched content.</p>
+</section>
+
+<section id="api" aria-labelledby="api-h">
+<h2 id="api-h">Library API</h2>
+<p><code>deliver</code> is also a library crate. Load a spec, run it, read
+the report:</p>
+<pre><code>use deliver::{Spec, ValidateOptions};
+
+let spec = Spec::load_file(std::path::Path::new("deliver.toml"))?;
+let report = spec.validate_with_options(base, jobs, &amp;ValidateOptions::default())?;
+assert!(report.pass);</code></pre>
+<p>From 1.0 the crate follows Semantic Versioning. Everything reachable from
+the crate root is public API, including the serialized shapes (JSON reports,
+attestation bundles, plugin protocol v1). Spec fields are fail-closed, so
+adding one is a minor change; removing or reinterpreting one requires a
+major. MSRV is Rust 1.74, documented in <code>Cargo.toml</code>, and the
+crate denies missing documentation so every public item is specified.</p>
+</section>
+
+<section id="releases" aria-labelledby="releases-h">
+<h2 id="releases-h">Releases and provenance</h2>
+<p>Release candidates are built by a GitHub Actions workflow on Linux,
+macOS, and Windows with SHA-256 checksums and GitHub artifact attestations;
+see <code>RELEASE_CANDIDATE.md</code> for the verification and rollback
+procedure. Changes are tracked in <code>CHANGELOG.md</code>.</p>
+</section>
+
+</main>
+<footer><div class="mast-inner">
+<p>deliver runs locally and offline. The canonical sources for this page are
+<code>README.md</code> and <code>man/deliver.1</code> in the repository;
+this site is their rendered form. Serve it with
+<code>docs/server</code> on <code>127.0.0.1:8743</code>.</p>
+</div></footer>
+</body>
+</html>

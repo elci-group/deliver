@@ -1,0 +1,16 @@
+# Example spec using the plugin protocol.
+#
+# Run from this directory:
+#   deliver --spec spec.toml --base . --allow-commands
+
+[[plugin]]
+name = "docs completeness"
+cmd = ["sh", "plugin.sh"]
+timeout_secs = 30
+weight = 2.0
+
+# Plugins support the same skip conditions as other checks.
+[[plugin]]
+name = "linux-only gate"
+cmd = ["sh", "-c", "echo '{\"pass\": true}'"]
+when = { os = "linux" }

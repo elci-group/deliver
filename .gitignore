@@ -6,3 +6,12 @@ __pycache__/
 /.deliver
 /.orb
 /.brandi/state/
+/.azusa/
+/.claude/
+/.elci/
+/.uni/
+/.dreams/
+/poka.toml
+/poka.lock
+/website/
+docs/server/target/

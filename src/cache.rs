@@ -14,16 +14,24 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// One stored outcome: the file content it was validated against, the git
+/// HEAD it was pinned to (incremental mode), and the result itself.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedResult {
+    /// SHA-256 of the validated file content.
     pub content_hash: String,
+    /// Git commit the entry was recorded under, when known.
     pub head: Option<String>,
+    /// Whether the check passed.
     pub pass: bool,
+    /// The check's report message at validation time.
     pub message: String,
 }
 
-#[derive(Debug, Default)]
+/// A content-hash-keyed result cache for file checks (see the module docs).
+#[derive(Debug, Clone, Default)]
 pub struct Cache {
+    /// Location the cache was loaded from and will be saved to.
     pub path: PathBuf,
     entries: HashMap<String, Vec<CachedResult>>,
     touched: HashSet<String>,
@@ -49,16 +57,14 @@ impl Cache {
     pub fn check_key(check: &FileCheck) -> String {
         let json = serde_json::to_string(check).expect("FileCheck serializes");
         sha256_hex(
-            [
-                env!("CARGO_PKG_VERSION").as_bytes(),
-                &[0],
-                json.as_bytes(),
-            ]
-            .concat()
-            .as_slice(),
+            [env!("CARGO_PKG_VERSION").as_bytes(), &[0], json.as_bytes()]
+                .concat()
+                .as_slice(),
         )
     }
 
+    /// SHA-256 of arbitrary content, the same function used for the
+    /// entry-level content hash.
     pub fn content_hash(content: &[u8]) -> String {
         sha256_hex(content)
     }
@@ -88,6 +94,9 @@ impl Cache {
         Some(hit)
     }
 
+    /// Record a result under `key` for `content_hash`, pinning it to `head`
+    /// when supplied. Replaces any existing entry with the same content
+    /// hash and marks the key touched for the next [`Cache::save`].
     pub fn insert(
         &mut self,
         key: &str,
@@ -103,7 +112,10 @@ impl Cache {
             pass: result.pass,
             message: result.message.clone(),
         };
-        match bucket.iter_mut().find(|e| e.content_hash == entry.content_hash) {
+        match bucket
+            .iter_mut()
+            .find(|e| e.content_hash == entry.content_hash)
+        {
             Some(existing) => *existing = entry,
             None => bucket.push(entry),
         }
@@ -130,7 +142,10 @@ pub fn default_dir() -> Option<PathBuf> {
     default_dir_from(std::env::var_os("XDG_CACHE_HOME"), std::env::var_os("HOME"))
 }
 
-fn default_dir_from(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsString>) -> Option<PathBuf> {
+fn default_dir_from(
+    xdg: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
     match xdg {
         Some(xdg) if !xdg.is_empty() => Some(PathBuf::from(xdg).join("deliver")),
         _ => home.map(|home| PathBuf::from(home).join(".cache").join("deliver")),
@@ -140,9 +155,7 @@ fn default_dir_from(xdg: Option<std::ffi::OsString>, home: Option<std::ffi::OsSt
 /// Cache file for a validated base directory inside `dir`: one JSON file per
 /// canonicalized base path, so distinct checkouts never share entries.
 pub fn cache_path(dir: &Path, base: &Path) -> PathBuf {
-    let canonical = base
-        .canonicalize()
-        .unwrap_or_else(|_| base.to_path_buf());
+    let canonical = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
     dir.join(sha256_hex(canonical.to_string_lossy().as_bytes()))
         .with_extension("json")
 }
@@ -176,7 +189,9 @@ mod tests {
             require_json_keys: Vec::new(),
             yaml_schema: None,
             check_references: false,
+            forbid_secrets: false,
             weight: None,
+            when: None,
         }
     }
 
@@ -209,10 +224,7 @@ mod tests {
 
     #[test]
     fn content_hash_changes_with_content() {
-        assert_ne!(
-            Cache::content_hash(b"hello"),
-            Cache::content_hash(b"world")
-        );
+        assert_ne!(Cache::content_hash(b"hello"), Cache::content_hash(b"world"));
         assert_eq!(Cache::content_hash(b"hello"), Cache::content_hash(b"hello"));
     }
 
@@ -232,7 +244,12 @@ mod tests {
     #[test]
     fn find_by_head_matches_only_same_head() {
         let mut cache = Cache::default();
-        cache.insert("key", "hash-a".to_string(), Some("abc123"), &result(true, "OK"));
+        cache.insert(
+            "key",
+            "hash-a".to_string(),
+            Some("abc123"),
+            &result(true, "OK"),
+        );
 
         assert!(cache.find_by_head("key", "abc123").is_some());
         assert!(cache.find_by_head("key", "other").is_none());
@@ -246,8 +263,18 @@ mod tests {
 
         let mut cache = Cache::load(path.clone());
         cache.insert("kept", "h1".to_string(), None, &result(true, "OK"));
-        cache.insert("stale", "h2".to_string(), None, &result(true, "OK"));
-        // Mark only "kept" as touched this run by looking it up.
+        // An entry left behind by an earlier run with a different spec
+        // (check key): never inserted or looked up in this run, so it must
+        // be pruned on save.
+        cache.entries.insert(
+            "stale".to_string(),
+            vec![CachedResult {
+                content_hash: "h2".to_string(),
+                head: None,
+                pass: true,
+                message: "old spec".to_string(),
+            }],
+        );
         assert!(cache.find_by_content("kept", "h1").is_some());
         cache.save().unwrap();
 

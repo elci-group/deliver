@@ -33,9 +33,11 @@ pub fn changed_paths(base: &Path) -> Result<HashSet<PathBuf>, String> {
             continue;
         }
         let path = normalize(Path::new(line));
-        if let Some(rel) = path.strip_prefix(&top) {
-            changed.insert(rel.to_path_buf());
-        }
+        // Git reports repo-root-relative paths; when the repo root is
+        // itself the prefix (or the path is already base-relative) the
+        // path is used as-is, otherwise the root prefix is stripped.
+        let rel = path.strip_prefix(&top).unwrap_or(&path);
+        changed.insert(rel.to_path_buf());
     }
 
     let canonical_base = base
@@ -82,6 +84,12 @@ fn git(base: &Path, args: &[&str]) -> Result<String, String> {
 
 /// Lexical normalization: resolve `.` and `..` components without touching
 /// the filesystem, so git-reported paths and spec paths compare equal.
+pub fn normalize_path(path: &Path) -> PathBuf {
+    normalize(path)
+}
+
+/// Lexical normalization: resolve `.` and `..` components without touching
+/// the filesystem, so git-reported paths and spec paths compare equal.
 fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
@@ -107,7 +115,12 @@ mod tests {
         let status = Command::new("git")
             .arg("-C")
             .arg(dir)
-            .args(["-c", "user.name=deliver-test", "-c", "user.email=test@example.com"])
+            .args([
+                "-c",
+                "user.name=deliver-test",
+                "-c",
+                "user.email=test@example.com",
+            ])
             .args(args)
             .status()
             .expect("git binary available for incremental tests");

@@ -9,6 +9,30 @@ _India execution update, 2026-10-14: see [INDIA_MARKET_READINESS.md](INDIA_MARKE
 for the market gates and [INDIA_EXECUTION.md](INDIA_EXECUTION.md) for the current
 implementation state. Sections below retain their original assessment context._
 
+_Phase 3 update, 2026-10-27: incremental validation, content-hash result
+caching, and opt-in fail-fast shipped against v0.4.0; the previously dormant
+`cache`/`incremental` modules are now wired into the crate and their tests run._
+
+_Phase 4 update, 2026-10-27: streaming NDJSON and GitHub Actions annotation
+formats shipped against v0.5.0, on a per-check event callback added to the
+library API (`validate_with_options_and_events`)._
+
+_Phase 5 update, 2026-10-27: attestation bundles (`--attest`, Ed25519-signed,
+verify via `deliver attest verify`), built-in `forbid_secrets` scanning, and
+the `[sbom]` presence/shape gate shipped against v0.6.0._
+
+_Phase 6 update, 2026-10-27: the `[[plugin]]` subprocess-protocol check kind
+shipped against v0.7.0 (one JSON request on stdin, one `{pass, message}`
+response on stdout, `--allow-commands` gated), with a runnable example under
+examples/plugin and a `plugin_check` JSON Schema definition._
+
+_Phase 7 update, 2026-10-28: 1.0.0 shipped — Semantic Versioning across the
+five compatibility surfaces (CLI, spec format, JSON reports, attestation
+bundles, plugin protocol), `#![deny(missing_docs)]` with a documented
+stability policy, MSRV 1.74, a compile-time trait inventory test, a
+rendered documentation site under `docs/`, and `CHANGELOG.md`. The roadmap
+is complete: breadth from here is a new conversation, not this document._
+
 ## Current State Assessment
 
 **Grade: B+.** The core is small, correct, and well-tested; the gaps that
@@ -175,33 +199,33 @@ _agents that need deterministic proof_.
 - [x] Per-check weights with weighted completion reporting
 - [x] Git commit message validation
 - [x] Git branch validation
-- [ ] Conditional checks (`when`)
+- [x] Conditional checks (`when`)
 
-### Phase 3: Performance & Parallelism (v0.4.0)
+### Phase 3: Performance & Parallelism (v0.4.0) — shipped
 - [x] Parallel check execution (`--jobs`)
-- [ ] Incremental validation (git-diff-aware: only re-check what changed)
-- [ ] Result caching keyed by file content hash
-- [ ] Early termination on first failure (opt-in)
+- [x] Incremental validation (git-diff-aware: only re-check what changed)
+- [x] Result caching keyed by file content hash
+- [x] Early termination on first failure (opt-in)
 
-### Phase 4: Output & Reporting (v0.5.0)
+### Phase 4: Output & Reporting (v0.5.0) — shipped
 - [x] SARIF 2.1.0 output
 - [x] JUnit XML output
-- [ ] Streaming NDJSON output
-- [ ] GitHub Actions inline annotations
+- [x] Streaming NDJSON output
+- [x] GitHub Actions inline annotations
 
-### Phase 5: Proof & Supply Chain (v0.6.0)
-- [ ] Deliverable attestation bundle (`--attest`)
-- [ ] Secret-pattern detection as a first-class check (beyond `forbid_regex`)
-- [ ] SBOM presence/shape validation
+### Phase 5: Proof & Supply Chain (v0.6.0) — shipped
+- [x] Deliverable attestation bundle (`--attest`)
+- [x] Secret-pattern detection as a first-class check (beyond `forbid_regex`)
+- [x] SBOM presence/shape validation
 
-### Phase 6: Extensibility (v0.7.0)
-- [ ] Subprocess-protocol plugin check kind
-- [ ] Plugin documentation and examples
+### Phase 6: Extensibility (v0.7.0) — shipped
+- [x] Subprocess-protocol plugin check kind
+- [x] Plugin documentation and examples
 
-### Phase 7: Polish (v1.0.0)
-- [ ] API stability guarantees for the `deliver` library crate
-- [ ] Documentation site
-- [ ] 1.0 release
+### Phase 7: Polish (v1.0.0) — shipped
+- [x] API stability guarantees for the `deliver` library crate
+- [x] Documentation site
+- [x] 1.0 release
 
 ## Competitive Positioning
 
@@ -229,8 +253,11 @@ builds, multi-ecosystem support.
 
 ## Conclusion
 
-The foundation is solid and, as of this pass, actually verified end-to-end —
-build, test, clippy, and fmt all gate the project's own spec, and the
-integration-test/CI/docs drift that had crept in is closed. The path from
-here is breadth: parallel execution, CI-native report formats, and a narrow
-extensibility story, in that order of leverage for `deliver`'s actual users.
+Every phase of this roadmap is shipped as of 1.0.0: advanced validation,
+parallel execution with caching and incremental mode, six report formats,
+supply-chain gates (attestations, secret scanning, SBOM), extensibility
+through the plugin protocol, and the polish work — Semantic Versioning
+across the five compatibility surfaces, full documentation coverage, a
+rendered docs site, and a changelog. Stability is now the feature: new
+capability arrives as additive minor versions, and breaking any of the five
+surfaces requires a 2.0. The path from here is a new conversation.

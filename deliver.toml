@@ -32,6 +32,26 @@ require_regex = [
   "Check Weights",
   "weight = 4.0",
   "complete by weight",
+  "Conditional Checks",
+  "file_exists",
+  "Incremental Validation and Caching",
+  "--incremental",
+  "--cache-dir",
+  "Fail-Fast",
+  "Streaming NDJSON",
+  "--format ndjson",
+  "GitHub Actions Annotations",
+  "--format github",
+  "Deliverable Attestations",
+  "--attest",
+  "attest verify",
+  "forbid_secrets",
+  "SBOM Check",
+  "Plugin Checks",
+  "--allow-commands",
+  "Documentation & Stability",
+  "CHANGELOG.md",
+  "Semantic Versioning",
 ]
 
 [[file]]
@@ -46,6 +66,16 @@ require_regex = [
   "--jobs",
   "SARIF 2\\.1\\.0",
   "JUnit XML",
+  "CONDITIONAL CHECKS",
+  "--incremental",
+  "--fail-fast",
+  "--cache-dir",
+  "ndjson",
+  "::error",
+  "forbid_secrets",
+  "\\[sbom\\]",
+  "--attest",
+  "PLUGIN CHECKS",
 ]
 
 [[file]]
@@ -65,7 +95,39 @@ require_regex = [
   "\\[x\\] SARIF 2\\.1\\.0 output",
   "\\[x\\] JUnit XML output",
   "\\[x\\] Per-check weights",
+  "\\[x\\] Conditional checks \\(`when`\\)",
+  "\\[x\\] Incremental validation",
+  "\\[x\\] Result caching keyed by file content hash",
+  "\\[x\\] Early termination on first failure",
+  "\\[x\\] Streaming NDJSON output",
+  "\\[x\\] GitHub Actions inline annotations",
+  "\\[x\\] Deliverable attestation bundle",
+  "\\[x\\] Secret-pattern detection as a first-class check",
+  "\\[x\\] SBOM presence/shape validation",
+  "\\[x\\] Subprocess-protocol plugin check kind",
+  "\\[x\\] Plugin documentation and examples",
+  "\\[x\\] API stability guarantees",
+  "\\[x\\] Documentation site",
+  "\\[x\\] 1.0 release",
 ]
+
+[[file]]
+path = "docs/index.html"
+required = true
+require_regex = [
+  "Plugin checks",
+  "forbid_secrets",
+  "sbom",
+  "--attest",
+  "--allow-commands",
+  "Semantic Versioning",
+]
+
+[[file]]
+path = "CHANGELOG.md"
+required = true
+min_size_bytes = 2000
+require_regex = ["## 1.0.0", "Semantic Versioning", "plugin", "attestation"]
 
 [[command]]
 name = "cargo test"

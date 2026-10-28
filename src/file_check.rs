@@ -5,12 +5,16 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
+/// Validate one file against its spec: resolves the path under `--base`
+/// (path guard enforced) and applies every configured requirement in a
+/// fixed order, returning the first failure or a passing result.
 pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
     let name = format!("file: {}", check.path);
     let path = match crate::path_guard::resolve(base, Path::new(&check.path)) {
         Ok(path) => path,
         Err(message) => {
             return CheckResult {
+                skipped: false,
                 name,
                 pass: false,
                 kind: "file".to_string(),
@@ -29,6 +33,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
         if let Ok(metadata) = fs::symlink_metadata(base.join(&check.path)) {
             if metadata.file_type().is_symlink() {
                 return CheckResult {
+            skipped: false,
                     name,
                     pass: false,
                     kind: "file".to_string(),
@@ -46,6 +51,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
         Ok(metadata) => metadata,
         Err(error) => {
             return CheckResult {
+                skipped: false,
                 name,
                 pass: false,
                 kind: "file".to_string(),
@@ -57,6 +63,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
 
     if metadata.is_dir() {
         return CheckResult {
+            skipped: false,
             name,
             pass: false,
             kind: "file".to_string(),
@@ -73,6 +80,7 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
         Ok(content) => content,
         Err(error) => {
             return CheckResult {
+                skipped: false,
                 name,
                 pass: false,
                 kind: "file".to_string(),
@@ -123,7 +131,14 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
         return result;
     }
 
+    if check.forbid_secrets {
+        if let Some(result) = validate_secrets(check, &name, &content) {
+            return result;
+        }
+    }
+
     CheckResult {
+        skipped: false,
         name,
         pass: true,
         kind: "file".to_string(),
@@ -132,9 +147,74 @@ pub fn validate_file(check: &FileCheck, base: &Path) -> CheckResult {
     }
 }
 
+/// Built-in, high-confidence secret patterns: known credential prefixes and
+/// key-material markers only. Deliberately conservative — a secret gate that
+/// cries wolf gets disabled. Reports name the pattern and line, never the
+/// matched content.
+const SECRET_PATTERNS: [(&str, &str); 10] = [
+    ("aws-access-key", r"AKIA[0-9A-Z]{16}"),
+    ("github-token", r"ghp_[A-Za-z0-9]{36}"),
+    ("github-fine-grained-token", r"github_pat_[A-Za-z0-9_]{82}"),
+    ("gitlab-token", r"glpat-[A-Za-z0-9\-_]{20,}"),
+    ("slack-token", r"xox[baprs]-[A-Za-z0-9\-]{10,}"),
+    ("stripe-key", r"(sk|rk)_(live|test)_[A-Za-z0-9]{20,}"),
+    ("google-api-key", r"AIza[0-9A-Za-z_\-]{35}"),
+    (
+        "private-key-block",
+        r"-----BEGIN (RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY( BLOCK)?-----",
+    ),
+    (
+        "jwt",
+        r"eyJ[A-Za-z0-9_\-]{15,}\.eyJ[A-Za-z0-9_\-]{15,}\.[A-Za-z0-9_\-]{15,}",
+    ),
+    (
+        "assigned-secret",
+        r#"(?i)\b(password|passwd|secret|api_key|apikey|token)\b["']?\s*[:=]\s*["'][^"']{8,}["']"#,
+    ),
+];
+
+fn validate_secrets(check: &FileCheck, name: &str, content: &str) -> Option<CheckResult> {
+    let fail = |message: String| {
+        Some(CheckResult {
+            skipped: false,
+            name: name.to_string(),
+            pass: false,
+            kind: "file".to_string(),
+            weight: check.weight,
+            message,
+        })
+    };
+
+    let mut compiled: Vec<(&str, Regex)> = Vec::with_capacity(SECRET_PATTERNS.len());
+    for (label, pattern) in SECRET_PATTERNS {
+        match Regex::new(pattern) {
+            Ok(regex) => compiled.push((label, regex)),
+            Err(error) => {
+                return fail(format!(
+                    "internal error: built-in secret pattern '{}' is invalid: {}",
+                    label, error
+                ));
+            }
+        }
+    }
+
+    for (label, regex) in &compiled {
+        if let Some(mat) = regex.find(content) {
+            let line = content[..mat.start()].matches('\n').count() + 1;
+            return fail(format!(
+                "matched secret pattern \"{}\" on line {}. Suggestion: remove the secret, \
+                 rotate the credential, and purge it from repository history.",
+                label, line
+            ));
+        }
+    }
+    None
+}
+
 fn missing_file(check: &FileCheck, name: String, path: &Path) -> CheckResult {
     if check.required {
         CheckResult {
+            skipped: false,
             name,
             pass: false,
             kind: "file".to_string(),
@@ -146,6 +226,7 @@ fn missing_file(check: &FileCheck, name: String, path: &Path) -> CheckResult {
         }
     } else {
         CheckResult {
+            skipped: false,
             name,
             pass: true,
             kind: "file".to_string(),
@@ -160,6 +241,7 @@ fn validate_size(check: &FileCheck, name: &str, size: u64) -> Option<CheckResult
     if let Some(max) = check.max_size_bytes {
         if size > max {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -174,6 +256,7 @@ fn validate_size(check: &FileCheck, name: &str, size: u64) -> Option<CheckResult
     if let Some(min) = check.min_size_bytes {
         if size < min {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -204,6 +287,7 @@ fn validate_encoding(check: &FileCheck, name: &str, content: &str) -> Option<Che
 
         if !valid {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -223,6 +307,7 @@ fn validate_hashes(check: &FileCheck, name: &str, path: &Path) -> Option<CheckRe
         Ok(bytes) => bytes,
         Err(error) => {
             return Some(CheckResult {
+                skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -239,6 +324,7 @@ fn validate_hashes(check: &FileCheck, name: &str, path: &Path) -> Option<CheckRe
 
         if actual_sha256 != *expected_sha256 {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -256,6 +342,7 @@ fn validate_hashes(check: &FileCheck, name: &str, path: &Path) -> Option<CheckRe
 
         if actual_blake3 != *expected_blake3 {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -278,6 +365,7 @@ fn validate_license_header(check: &FileCheck, name: &str, content: &str) -> Opti
 
         if !header.contains(expected_header) {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -299,6 +387,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
             Ok(v) => v,
             Err(error) => {
                 return Some(CheckResult {
+                    skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -316,6 +405,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
             Ok(s) => s,
             Err(error) => {
                 return Some(CheckResult {
+                    skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -333,6 +423,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
             Ok(v) => v,
             Err(error) => {
                 return Some(CheckResult {
+            skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -352,6 +443,7 @@ fn validate_json_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                 .map(|e| format!("{}: {}", e.instance_path, e))
                 .collect();
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -372,6 +464,7 @@ fn validate_toml_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
             Ok(v) => v,
             Err(error) => {
                 return Some(CheckResult {
+            skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -393,6 +486,7 @@ fn validate_toml_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
 
         if !missing_keys.is_empty() {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -432,6 +526,7 @@ fn validate_json_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
             Ok(v) => v,
             Err(error) => {
                 return Some(CheckResult {
+            skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -453,6 +548,7 @@ fn validate_json_keys(check: &FileCheck, name: &str, content: &str) -> Option<Ch
 
         if !missing_keys.is_empty() {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -497,6 +593,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                     Ok(v) => v,
                     Err(error) => {
                         return Some(CheckResult {
+            skipped: false,
                             name: name.to_string(),
                             pass: false,
                             kind: "file".to_string(),
@@ -516,6 +613,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
             Ok(s) => s,
             Err(error) => {
                 return Some(CheckResult {
+                    skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -533,6 +631,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
             Ok(v) => v,
             Err(error) => {
                 return Some(CheckResult {
+            skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -550,6 +649,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
             Ok(v) => v,
             Err(error) => {
                 return Some(CheckResult {
+            skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -569,6 +669,7 @@ fn validate_yaml_schema(check: &FileCheck, name: &str, content: &str) -> Option<
                 .map(|e| format!("{}: {}", e.instance_path, e))
                 .collect();
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "file".to_string(),
@@ -666,6 +767,7 @@ fn validate_references(
 
     if !missing_refs.is_empty() {
         return Some(CheckResult {
+            skipped: false,
             name: name.to_string(),
             pass: false,
             kind: "file".to_string(),
@@ -688,6 +790,7 @@ fn validate_line_count(check: &FileCheck, name: &str, content: &str) -> Option<C
     }
 
     Some(CheckResult {
+            skipped: false,
         name: name.to_string(),
         pass: false,
         kind: "file".to_string(),
@@ -704,6 +807,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
         match Regex::new(pattern) {
             Ok(regex) if regex.is_match(content) => {
                 return Some(CheckResult {
+            skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -717,6 +821,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
             Ok(_) => {}
             Err(error) => {
                 return Some(CheckResult {
+                    skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -734,6 +839,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
         match Regex::new(pattern) {
             Ok(regex) if !regex.is_match(content) => {
                 return Some(CheckResult {
+            skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -747,6 +853,7 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
             Ok(_) => {}
             Err(error) => {
                 return Some(CheckResult {
+                    skipped: false,
                     name: name.to_string(),
                     pass: false,
                     kind: "file".to_string(),
@@ -761,4 +868,132 @@ fn validate_patterns(check: &FileCheck, name: &str, content: &str) -> Option<Che
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::FileCheck;
+    use tempfile::TempDir;
+
+    fn base_check(path: &str) -> FileCheck {
+        FileCheck {
+            path: path.to_string(),
+            required: true,
+            max_size_bytes: None,
+            min_size_bytes: None,
+            forbid_regex: Vec::new(),
+            require_regex: Vec::new(),
+            require_line_count: None,
+            encoding: None,
+            forbid_symlinks: false,
+            sha256: None,
+            blake3: None,
+            require_license_header: None,
+            json_schema: None,
+            require_toml_keys: Vec::new(),
+            require_json_keys: Vec::new(),
+            yaml_schema: None,
+            check_references: false,
+            forbid_secrets: false,
+            weight: None,
+            when: None,
+        }
+    }
+
+    fn write_and_run(dir: &TempDir, content: &str) -> CheckResult {
+        std::fs::write(dir.path().join("a.txt"), content).unwrap();
+        let check = FileCheck {
+            forbid_secrets: true,
+            ..base_check("a.txt")
+        };
+        validate_file(&check, dir.path())
+    }
+
+    #[test]
+    fn all_builtin_secret_patterns_compile() {
+        for (label, pattern) in SECRET_PATTERNS {
+            Regex::new(pattern).unwrap_or_else(|e| panic!("pattern {} invalid: {}", label, e));
+        }
+    }
+
+    #[test]
+    fn secret_detection_fails_with_pattern_name_and_line_but_not_content() {
+        let dir = TempDir::new().unwrap();
+        let content = "let name = \"harmless\";\nlet key = \"AKIAABCDEFGHIJKLMNOP\";\n";
+        let result = write_and_run(&dir, content);
+        assert!(!result.pass);
+        assert!(
+            result.message.contains("aws-access-key"),
+            "{}",
+            result.message
+        );
+        assert!(result.message.contains("line 2"), "{}", result.message);
+        assert!(
+            !result.message.contains("AKIAABCDEFGHIJKLMNOP"),
+            "the matched secret value must never appear in the report"
+        );
+    }
+
+    #[test]
+    fn each_secret_pattern_family_is_detected() {
+        let cases = [
+            (
+                "github-token",
+                "token: ghp_abcdef0123456789abcdef0123456789abcdef01",
+            ),
+            (
+                "github-fine-grained-token",
+                &format!("github_pat_{}", "A1_".repeat(28)),
+            ),
+            ("gitlab-token", "glpat-AbCdEf1234567890-_abc"),
+            ("slack-token", "xoxb-123456789012-abcdef"),
+            // Assembled at runtime: a literal fixture in Stripe's live-key
+            // format trips GitHub push protection, though it is synthetic.
+            (
+                "stripe-key",
+                &format!("sk_{}_{}", "live", "a1b2c3d4e5f6g7h8i9j0k1l2"),
+            ),
+            ("google-api-key", "AIzaSyA1234567890abcdefghijklmnopqrstuv"),
+            ("private-key-block", "-----BEGIN RSA PRIVATE KEY-----"),
+            (
+                "jwt",
+                "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJ",
+            ),
+            ("assigned-secret", "password = \"hunter2hunter2\""),
+        ];
+        for (label, content) in cases {
+            let dir = TempDir::new().unwrap();
+            let result = write_and_run(&dir, content);
+            assert!(
+                !result.pass,
+                "content for {} must be detected: {}",
+                label, result.message
+            );
+            assert!(
+                result.message.contains(label),
+                "{} message must name the pattern: {}",
+                label,
+                result.message
+            );
+        }
+    }
+
+    #[test]
+    fn innocuous_content_passes_secret_scan() {
+        let dir = TempDir::new().unwrap();
+        let content =
+            "token_count = 42\npassword_hashing_algorithm = \"argon2\"\nAKIAs are not keys\n";
+        let result = write_and_run(&dir, content);
+        assert!(result.pass, "{}", result.message);
+    }
+
+    #[test]
+    fn forbid_secrets_disabled_by_default() {
+        let dir = TempDir::new().unwrap();
+        let check = base_check("a.txt");
+        std::fs::write(dir.path().join("a.txt"), "AKIAABCDEFGHIJKLMNOP").unwrap();
+        let result = validate_file(&check, dir.path());
+        assert!(result.pass);
+    }
 }

@@ -8,6 +8,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
         Ok(path) => path,
         Err(message) => {
             return CheckResult {
+                skipped: false,
                 name,
                 pass: false,
                 kind: "directory".to_string(),
@@ -25,6 +26,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
         Ok(metadata) => metadata,
         Err(error) => {
             return CheckResult {
+                skipped: false,
                 name,
                 pass: false,
                 kind: "directory".to_string(),
@@ -36,6 +38,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
 
     if !metadata.is_dir() {
         return CheckResult {
+            skipped: false,
             name,
             pass: false,
             kind: "directory".to_string(),
@@ -48,6 +51,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
         Ok(count) => count,
         Err(error) => {
             return CheckResult {
+                skipped: false,
                 name,
                 pass: false,
                 kind: "directory".to_string(),
@@ -63,6 +67,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
 
     if check.forbid_empty && file_count == 0 {
         return CheckResult {
+            skipped: false,
             name,
             pass: false,
             kind: "directory".to_string(),
@@ -73,6 +78,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
     }
 
     CheckResult {
+        skipped: false,
         name,
         pass: true,
         kind: "directory".to_string(),
@@ -84,6 +90,7 @@ pub fn validate_directory(check: &DirectoryCheck, base: &Path) -> CheckResult {
 fn missing_directory(check: &DirectoryCheck, name: String, path: &Path) -> CheckResult {
     if check.required {
         CheckResult {
+            skipped: false,
             name,
             pass: false,
             kind: "directory".to_string(),
@@ -95,6 +102,7 @@ fn missing_directory(check: &DirectoryCheck, name: String, path: &Path) -> Check
         }
     } else {
         CheckResult {
+            skipped: false,
             name,
             pass: true,
             kind: "directory".to_string(),
@@ -109,6 +117,7 @@ fn validate_file_count(check: &DirectoryCheck, name: &str, count: usize) -> Opti
     if let Some(max) = check.max_files {
         if count > max {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "directory".to_string(),
@@ -123,6 +132,7 @@ fn validate_file_count(check: &DirectoryCheck, name: &str, count: usize) -> Opti
     if let Some(min) = check.min_files {
         if count < min {
             return Some(CheckResult {
+            skipped: false,
                 name: name.to_string(),
                 pass: false,
                 kind: "directory".to_string(),

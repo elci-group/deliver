@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 const PIPE_CLOSE_GRACE: Duration = Duration::from_secs(1);
 
 pub fn validate_command(check: &CommandCheck, base: &Path) -> CheckResult {
@@ -14,6 +14,7 @@ pub fn validate_command(check: &CommandCheck, base: &Path) -> CheckResult {
         Ok(parts) => parts,
         Err(message) => {
             return CheckResult {
+                skipped: false,
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
@@ -27,6 +28,7 @@ pub fn validate_command(check: &CommandCheck, base: &Path) -> CheckResult {
         Ok(path) => path,
         Err(message) => {
             return CheckResult {
+                skipped: false,
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
@@ -57,6 +59,7 @@ pub fn validate_command(check: &CommandCheck, base: &Path) -> CheckResult {
         Ok(child) => child,
         Err(error) => {
             return CheckResult {
+            skipped: false,
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
@@ -82,6 +85,7 @@ pub fn validate_command(check: &CommandCheck, base: &Path) -> CheckResult {
                 format!("command execution failed: {error}")
             };
             return CheckResult {
+                skipped: false,
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
@@ -121,6 +125,7 @@ fn check_command_result(
 ) -> CheckResult {
     if result.stdout.exceeded || result.stderr.exceeded {
         return CheckResult {
+            skipped: false,
             name: check.name.clone(),
             pass: false,
             kind: "command".to_string(),
@@ -136,6 +141,7 @@ fn check_command_result(
 
     if result.status.code() != Some(check.expect_exit) {
         return CheckResult {
+            skipped: false,
             name: check.name.clone(),
             pass: false,
             kind: "command".to_string(),
@@ -152,6 +158,7 @@ fn check_command_result(
     for (index, expected) in check.stdout_contains.iter().enumerate() {
         if !stdout.contains(expected) {
             return CheckResult {
+            skipped: false,
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
@@ -167,6 +174,7 @@ fn check_command_result(
     for (index, expected) in check.stderr_contains.iter().enumerate() {
         if !stderr.contains(expected) {
             return CheckResult {
+            skipped: false,
                 name: check.name.clone(),
                 pass: false,
                 kind: "command".to_string(),
@@ -180,6 +188,7 @@ fn check_command_result(
     }
 
     CheckResult {
+        skipped: false,
         name: check.name.clone(),
         pass: true,
         kind: "command".to_string(),
@@ -189,19 +198,19 @@ fn check_command_result(
 }
 
 #[derive(Debug)]
-struct ProcessResult {
-    status: std::process::ExitStatus,
-    stdout: CapturedOutput,
-    stderr: CapturedOutput,
+pub(crate) struct ProcessResult {
+    pub status: std::process::ExitStatus,
+    pub stdout: CapturedOutput,
+    pub stderr: CapturedOutput,
 }
 
 #[derive(Debug)]
-struct CapturedOutput {
-    bytes: Vec<u8>,
-    exceeded: bool,
+pub(crate) struct CapturedOutput {
+    pub bytes: Vec<u8>,
+    pub exceeded: bool,
 }
 
-fn wait_with_timeout(
+pub(crate) fn wait_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
 ) -> Result<ProcessResult, String> {

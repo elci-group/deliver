@@ -31,6 +31,7 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
         Ok(regex) => regex,
         Err(error) => {
             return CheckResult {
+                skipped: false,
                 name,
                 pass: false,
                 kind: "git".to_string(),
@@ -54,6 +55,7 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
         }
         _ => {
             return CheckResult {
+            skipped: false,
                 name,
                 pass: false,
                 kind: "git".to_string(),
@@ -65,6 +67,7 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
 
     let pass = regex.is_match(&branch);
     CheckResult {
+        skipped: false,
         name,
         pass,
         kind: "git".to_string(),
@@ -82,6 +85,7 @@ fn validate_branch(base: &Path, pattern: &str) -> CheckResult {
 
 fn invalid_commit_message_regex(name: String, pattern: &str, error: regex::Error) -> CheckResult {
     CheckResult {
+        skipped: false,
         name,
         pass: false,
         kind: "git".to_string(),
@@ -111,6 +115,7 @@ fn validate_commit_message(base: &Path, pattern: &str) -> CheckResult {
         }
         _ => {
             return CheckResult {
+            skipped: false,
                 name,
                 pass: false,
                 kind: "git".to_string(),
@@ -122,6 +127,7 @@ fn validate_commit_message(base: &Path, pattern: &str) -> CheckResult {
 
     let pass = regex.is_match(&message);
     CheckResult {
+        skipped: false,
         name,
         pass,
         kind: "git".to_string(),
@@ -147,6 +153,7 @@ fn validate_no_uncommitted_changes(base: &Path) -> CheckResult {
         .unwrap_or(false);
 
     CheckResult {
+        skipped: false,
         name: "git: no uncommitted changes".to_string(),
         pass,
         kind: "git".to_string(),
@@ -170,6 +177,7 @@ fn validate_no_untracked_files(base: &Path) -> CheckResult {
     let pass = untracked == 0;
 
     CheckResult {
+        skipped: false,
         name: "git: no untracked files".to_string(),
         pass,
         kind: "git".to_string(),

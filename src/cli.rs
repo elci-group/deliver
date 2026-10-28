@@ -44,6 +44,18 @@ pub struct Args {
     #[arg(long)]
     pub strict: bool,
 
+    /// Write an attestation bundle to PATH after a passing run: a
+    /// timestamped receipt carrying spec and report hashes, the git commit,
+    /// and optionally an Ed25519 signature (--attest-key). Runs that do not
+    /// pass never produce a bundle.
+    #[arg(long, value_name = "PATH")]
+    pub attest: Option<PathBuf>,
+
+    /// Ed25519 private key file (from `deliver keygen`) used to sign the
+    /// --attest bundle.
+    #[arg(long, value_name = "PATH")]
+    pub attest_key: Option<PathBuf>,
+
     /// Permit command checks from a trusted spec. Commands run with this
     /// process's privileges and inherited environment.
     #[arg(long)]
@@ -56,6 +68,27 @@ pub struct Args {
     /// state (e.g. the same build directory) may contend with each other.
     #[arg(short, long, default_value = "1", value_name = "N")]
     pub jobs: usize,
+
+    /// Stop running remaining checks after the first failure. Skipped
+    /// checks are reported as skipped, never as passed or failed. With
+    /// --jobs > 1 the set of checks that still runs is timing-dependent.
+    #[arg(long)]
+    pub fail_fast: bool,
+
+    /// Re-check only files changed since HEAD, replaying cached results
+    /// for unchanged files. Requires --base inside a Git repository with
+    /// at least one commit, and implies the default --cache-dir when
+    /// --cache-dir is not given. Applies to --spec and --json runs.
+    #[arg(long)]
+    pub incremental: bool,
+
+    /// Directory for the result cache used by --incremental and
+    /// --cache-dir itself (one JSON file per --base). Replays file-check
+    /// results for identical file content; entries are keyed by the
+    /// deliver version plus the full check definition, so any spec edit
+    /// invalidates them.
+    #[arg(long, value_name = "DIR")]
+    pub cache_dir: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -80,6 +113,33 @@ pub enum Commands {
     },
     /// Print the JSON Schema for the spec format
     Schema,
+    /// Generate an Ed25519 keypair for --attest signing
+    Keygen {
+        /// Prefix for the written files: <PREFIX>.key (keep private) and
+        /// <PREFIX>.pub
+        #[arg(long, default_value = "deliver", value_name = "PREFIX")]
+        out: String,
+    },
+    /// Attestation bundle operations
+    Attest {
+        #[command(subcommand)]
+        command: AttestCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AttestCommands {
+    /// Verify an attestation bundle's integrity and signature
+    Verify {
+        /// Path to the attestation bundle
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Public key file used to authenticate the signer; without it, a
+        /// signature is only checked for self-consistency with its embedded
+        /// key
+        #[arg(long = "pub", value_name = "PATH")]
+        pub_key: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -97,6 +157,13 @@ pub enum OutputFormat {
     Sarif,
     /// JUnit XML, for CI test-result dashboards. Every check is emitted as a testcase.
     Junit,
+    /// Newline-delimited JSON: one line per check the moment it finishes,
+    /// then one summary line. For agents and dashboards that react to
+    /// partial progress instead of polling exit status.
+    Ndjson,
+    /// GitHub Actions workflow commands: failing checks become ::error
+    /// annotations, plus one ::notice summary line.
+    Github,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

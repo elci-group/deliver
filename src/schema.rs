@@ -18,9 +18,12 @@ pub fn spec_json_schema() -> Value {
             "files": { "type": "array", "items": { "$ref": "#/definitions/file_check" } },
             "command": { "type": "array", "items": { "$ref": "#/definitions/command_check" } },
             "commands": { "type": "array", "items": { "$ref": "#/definitions/command_check" } },
+            "plugin": { "type": "array", "items": { "$ref": "#/definitions/plugin_check" } },
+            "plugins": { "type": "array", "items": { "$ref": "#/definitions/plugin_check" } },
             "directory": { "type": "array", "items": { "$ref": "#/definitions/directory_check" } },
             "directories": { "type": "array", "items": { "$ref": "#/definitions/directory_check" } },
             "git": { "$ref": "#/definitions/git_check" },
+            "sbom": { "$ref": "#/definitions/sbom_check" },
             "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
         },
         "additionalProperties": false,
@@ -51,7 +54,13 @@ pub fn spec_json_schema() -> Value {
                         "default": false,
                         "description": "For .rs/.py/.js/.ts/.jsx/.tsx/.c/.cpp/.h/.hpp files, fail if a local mod/import/#include reference does not exist."
                     },
-                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." }
+                    "forbid_secrets": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Fail when the file matches a built-in, high-confidence secret pattern (AWS keys, provider tokens, private key blocks, ...). Reports name the pattern and line, never the matched content."
+                    },
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." },
+                    "when": { "$ref": "#/definitions/when_clause" }
                 }
             },
             "command_check": {
@@ -72,7 +81,8 @@ pub fn spec_json_schema() -> Value {
                     "timeout_secs": { "type": "integer", "minimum": 0, "default": 300 },
                     "stdout_contains": { "type": "array", "items": { "type": "string" } },
                     "stderr_contains": { "type": "array", "items": { "type": "string" } },
-                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." }
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." },
+                    "when": { "$ref": "#/definitions/when_clause" }
                 }
             },
             "directory_check": {
@@ -85,7 +95,8 @@ pub fn spec_json_schema() -> Value {
                     "min_files": { "type": "integer", "minimum": 0 },
                     "max_files": { "type": "integer", "minimum": 0 },
                     "forbid_empty": { "type": "boolean", "default": false },
-                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." }
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." },
+                    "when": { "$ref": "#/definitions/when_clause" }
                 }
             },
             "git_check": {
@@ -96,6 +107,58 @@ pub fn spec_json_schema() -> Value {
                     "no_untracked_files": { "type": "boolean", "default": false },
                     "require_branch_regex": { "type": "string" },
                     "require_commit_message_regex": { "type": "string" }
+                }
+            },
+            "when_clause": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Skip conditions; the check is skipped rather than failed when any declared condition does not hold. Declared conditions combine with AND.",
+                "properties": {
+                    "file_exists": {
+                        "type": "string",
+                        "description": "Base-relative path that must exist for the check to run."
+                    },
+                    "os": {
+                        "type": "string",
+                        "description": "Operating system that must match the running one (linux, macos, or windows; case-insensitive)."
+                    }
+                }
+            },
+            "sbom_check": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "SBOM presence and shape check: searches *.spdx, *.spdx.json, *.cdx.json, and bom.json under --base for SPDX or CycloneDX documents with their core fields present.",
+                "properties": {
+                    "required": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Fail when no SBOM is found. With false, absence passes but a malformed SBOM still fails."
+                    },
+                    "formats": {
+                        "type": "array",
+                        "items": { "type": "string", "enum": ["spdx", "cyclonedx"] },
+                        "description": "Accepted formats; empty accepts any supported format."
+                    },
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." }
+                }
+            },
+            "plugin_check": {
+                "type": "object",
+                "required": ["name", "cmd"],
+                "additionalProperties": false,
+                "description": "Subprocess-protocol plugin check (v1): the runner writes {\"protocol\":1,\"name\":...,\"base\":...} to the plugin's stdin and expects {\"pass\":true|false,\"message\":\"...\"} on stdout with exit 0. Plugins are arbitrary code and require --allow-commands.",
+                "properties": {
+                    "name": { "type": "string" },
+                    "cmd": {
+                        "anyOf": [
+                            { "type": "string" },
+                            { "type": "array", "items": { "type": "string" } }
+                        ]
+                    },
+                    "cwd": { "type": "string", "default": "." },
+                    "timeout_secs": { "type": "integer", "minimum": 0, "default": 300 },
+                    "weight": { "type": "number", "description": "Relative importance in weighted completion reporting; unweighted checks count as 1.0." },
+                    "when": { "$ref": "#/definitions/when_clause" }
                 }
             }
         }
@@ -118,10 +181,12 @@ mod tests {
         let schema = spec_json_schema();
         let compiled = JSONSchema::compile(&schema).unwrap();
         let instance = json!({
-            "file": [{"path": "README.md", "required": true, "min_size_bytes": 10, "weight": 1.0}],
+            "file": [{"path": "README.md", "required": true, "min_size_bytes": 10, "weight": 1.0, "forbid_secrets": true}],
             "command": [{"name": "test", "cmd": ["cargo", "test"], "weight": 4.0}],
+            "plugin": [{"name": "org gate", "cmd": ["org-gate"], "timeout_secs": 60}],
             "directory": [{"path": "src", "forbid_empty": true, "weight": 2.5}],
-            "git": {"no_uncommitted_changes": true}
+            "git": {"no_uncommitted_changes": true},
+            "sbom": {"required": true, "formats": ["spdx", "cyclonedx"]}
         });
         assert!(compiled.is_valid(&instance));
     }
@@ -140,5 +205,29 @@ mod tests {
         let compiled = JSONSchema::compile(&schema).unwrap();
         let instance = json!({"not_a_real_field": true});
         assert!(!compiled.is_valid(&instance));
+    }
+
+    #[test]
+    fn schema_accepts_when_clauses() {
+        let schema = spec_json_schema();
+        let compiled = JSONSchema::compile(&schema).unwrap();
+        let instance = json!({
+            "file": [{"path": "Cargo.lock", "when": {"file_exists": "Cargo.toml", "os": "linux"}}],
+            "command": [{"name": "test", "cmd": "cargo test", "when": {"file_exists": "Cargo.toml"}}],
+            "directory": [{"path": "src", "when": {"os": "macos"}}]
+        });
+        assert!(compiled.is_valid(&instance));
+    }
+
+    #[test]
+    fn schema_rejects_unknown_when_keys_and_bad_types() {
+        let schema = spec_json_schema();
+        let compiled = JSONSchema::compile(&schema).unwrap();
+        assert!(!compiled.is_valid(&json!({
+            "file": [{"path": "a.txt", "when": {"file_existsx": "Cargo.toml"}}]
+        })));
+        assert!(!compiled.is_valid(&json!({
+            "file": [{"path": "a.txt", "when": {"os": 1}}]
+        })));
     }
 }

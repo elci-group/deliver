@@ -30,7 +30,9 @@ fn make_file_check(path: &str) -> FileCheck {
         require_json_keys: Vec::new(),
         yaml_schema: None,
         check_references: false,
+        forbid_secrets: false,
         weight: None,
+        when: None,
     }
 }
 
@@ -41,6 +43,8 @@ fn make_spec(files: Vec<FileCheck>) -> Spec {
         commands: Vec::new(),
         git: GitCheck::default(),
         directories: Vec::new(),
+        plugins: Vec::new(),
+        sbom: None,
         metadata: std::collections::HashMap::new(),
     }
 }

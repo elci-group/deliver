@@ -1,10 +1,25 @@
 [package]
 name = "deliver"
-version = "0.3.0"
+version = "1.0.1"
 edition = "2021"
+rust-version = "1.74"
 authors = ["Rory Spring-Vanhorne <rory.spring@icloud.com>"]
 description = "Deterministic deliverable validator for agent workflows"
 license = "MIT"
+repository = "https://github.com/elci-group/deliver"
+readme = "README.md"
+keywords = ["validation", "ci", "agent", "release-gate", "supply-chain"]
+categories = ["development-tools::testing", "command-line-utilities"]
+exclude = [
+    "/.azusa",
+    "/.brandi",
+    "/.claude",
+    "/.elci",
+    "/.uni",
+    "/website",
+    "/benchmark",
+    "/docs/server/target",
+]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
@@ -18,6 +33,8 @@ sha2 = "0.10"
 blake3 = "1.5"
 jsonschema = { version = "0.17", default-features = false }
 serde_yaml = "0.9"
+ed25519-dalek = { version = "2", default-features = false, features = ["fast", "zeroize"] }
+getrandom = "0.2"
 
 [dev-dependencies]
 tempfile = "3.10"

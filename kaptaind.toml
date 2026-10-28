@@ -16,9 +16,21 @@ a = 0.30
 d = 0.20
 r = 0.15
 
+[operation]
+mode = "actuate"
+
+[trust]
+execution = "trusted"
+
 [push]
-enabled = false
-branch = "master"
+enabled = true
+branch = "main"
+
+[push.safety]
+protect_branches = []
+
+[capabilities]
+network_push = true
 
 [angler.git_hooks]
 enabled = false
@@ -27,7 +39,7 @@ enabled = false
 min_commit_interval = 10
 
 [test]
-command = "cargo run -- --spec deliver.toml --strict --progress never"
+command = "cargo run -- --spec deliver.toml --strict --allow-commands --progress never"
 required = true
 
 [staging]
@@ -36,3 +48,10 @@ exclude = ["target/**", ".kaptaind/**", "*.log", ".env*"]
 
 [commit]
 require_bump = false
+
+[version_thresholds]
+minor = 0.6
+patch = 0.55
+
+[notify]
+enabled = false

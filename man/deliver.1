@@ -1,4 +1,4 @@
-.TH DELIVER 1 "September 2026" "deliver 0.3.0" "User Commands"
+.TH DELIVER 1 "October 2026" "deliver 1.0.0" "User Commands"
 .SH NAME
 deliver \- deterministic deliverable validator for agent workflows
 .SH SYNOPSIS
@@ -7,12 +7,16 @@ deliver \- deterministic deliverable validator for agent workflows
 [\fB--json\fR \fIJSON\fR]
 [\fB--file\fR \fIPATTERN\fR...]
 [\fB--base\fR \fIDIR\fR]
-[\fB--format\fR \fItext|json|sarif|junit\fR]
+[\fB--format\fR \fItext|json|sarif|junit|ndjson|github\fR]
 [\fB--color\fR \fIauto|always|never\fR]
 [\fB--progress\fR \fIauto|always|never\fR]
 [\fB--strict\fR]
 [\fB--allow-commands\fR]
 [\fB--jobs\fR \fIN\fR]
+[\fB--fail-fast\fR]
+[\fB--incremental\fR]
+[\fB--cache-dir\fR \fIDIR\fR]
+[\fB--attest\fR \fIPATH\fR [\fB--attest-key\fR \fIPATH\fR]]
 .br
 .B deliver
 \fICOMMAND\fR [\fIARGS\fR...]
@@ -20,8 +24,10 @@ deliver \- deterministic deliverable validator for agent workflows
 .B deliver
 validates concrete task outputs from a TOML or JSON spec. It can check file
 existence, size limits, required and forbidden regexes, hashes, schemas,
-directory shape, command exit status, stdout and stderr content, and Git
-cleanliness.
+built-in secret patterns, directory shape, SBOM presence and shape,
+subprocess-plugin gates, command exit status, stdout and stderr content, and
+Git cleanliness \- and can write and verify signed attestation bundles for
+passing runs.
 .SH COMMANDS
 .TP
 .B init [--output \fIPATH\fR]
@@ -39,12 +45,53 @@ Print shell completion script source for \fBbash\fR, \fBzsh\fR, or
 .B schema
 Print the spec format as a JSON Schema (draft-07) document to stdout, for
 editor and agent tooling to validate or autocomplete a spec file.
+.TP
+.B keygen [--out \fIPREFIX\fR]
+Generate an Ed25519 keypair for \fB--attest\fR signing: writes
+\fIPREFIX\fR.key (keep private; mode 0600) and \fIPREFIX\fR.pub. Default
+prefix \fBdeliver\fR.
+.TP
+.B attest verify \fIPATH\fR [--pub \fIPATH\fR]
+Verify an attestation bundle: payload integrity always, and the signature
+against the supplied public key when \fB--pub\fR is given (otherwise only
+self-consistency with the embedded key). Exits 1 on any failure.
 .SH SPEC COMPOSITION
 A spec file may set a top-level \fBextends\fR key naming a parent spec,
 resolved relative to the directory of the spec that declares it. Checks
 accumulate (parent checks run first); Git-cleanliness flags combine with
 \fBOR\fR, so a child spec can only add requirements on top of its parent.
 Circular \fBextends\fR chains are rejected with an error.
+.SH CONDITIONAL CHECKS
+Any \fB[[file]]\fR, \fB[[command]]\fR, or \fB[[directory]]\fR check may set a
+\fBwhen\fR table of skip conditions: \fBfile_exists\fR (a base-relative path
+that must exist) and/or \fBos\fR (\fBlinux\fR, \fBmacos\fR, or \fBwindows\fR,
+case-insensitive). Conditions combine with AND. When a condition does not
+hold, the check is skipped rather than failed: skipped checks report
+\fBpass = true\fR with a \fBskipped\fR flag in JSON, a \fB<skipped/>\fR
+element in JUnit XML, are excluded from weighted completion, and never fail a
+run. A \fBfile_exists\fR path that would escape \fB--base\fR never matches.
+.SH SUPPLY-CHAIN CHECKS
+File checks accept \fBforbid_secrets\fR: fail when the file matches a
+built-in, high-confidence secret pattern (AWS keys, provider tokens, private
+key blocks, JWTs, assigned credentials). Reports name the pattern and line,
+never the matched content.
+.PP
+A spec may declare one \fB[sbom]\fR section: \fBrequired\fR (default true)
+fails when no SBOM exists under \fB--base\fR, and \fBformats\fR restricts
+accepted documents to \fBspdx\fR or \fBcyclonedx\fR. Searched locations:
+\fB*.spdx\fR, \fB*.spdx.json\fR, \fB*.cdx.json\fR, \fBbom.json\fR.
+.SH PLUGIN CHECKS
+\fB[[plugin]]\fR checks extend \fBdeliver\fR with organization-specific
+gates: the runner spawns the plugin, writes one JSON request line to its
+stdin ({"protocol":1,"name":...,"base":...}), closes stdin, and expects one
+JSON response object with exit 0: {"pass":true|false,"message":"..."}. A
+nonzero exit, unparseable stdout, a missing \fBpass\fR boolean, or output
+over 1 MiB per stream fails the check with the plugin's stderr quoted.
+Plugins are arbitrary code and require \fB--allow-commands\fR like command
+checks; there is no sandboxing. They support \fBcwd\fR, \fBtimeout_secs\fR
+(process-group kill on timeout, Unix), \fBweight\fR, \fBwhen\fR, and
+accumulate across \fBextends\fR. See examples/plugin/ for a runnable
+example.
 .SH OPTIONS
 .TP
 .B -s, --spec \fIPATH\fR
@@ -64,21 +111,43 @@ Defaults to the current directory. Spec-selected paths may not escape this
 directory, including through symlinks.
 .TP
 .B --allow-commands
-Run command checks after reviewing the spec and its full extends chain.
-Commands inherit the runner's privileges and environment. Without this flag,
-specs containing command checks fail before any checks run. This is not a
-sandbox; isolate untrusted repositories in CI.
+Run command and plugin checks after reviewing the spec and its full extends
+chain. Commands and plugins inherit the runner's privileges and environment.
+Without this flag, specs containing them fail before any checks run. This is
+not a sandbox; isolate untrusted repositories in CI.
 .TP
-.B -f, --format \fItext|json|sarif|junit\fR
+.B -f, --format \fItext|json|sarif|junit|ndjson|github\fR
 Select the report format. Text is for people; JSON is for generic tools;
 \fBsarif\fR emits SARIF 2.1.0 (failed checks only, for GitHub code scanning
-and similar); \fBjunit\fR emits JUnit XML (every check, for CI dashboards).
+and similar); \fBjunit\fR emits JUnit XML (every check, for CI dashboards);
+\fBndjson\fR streams one JSON line per check the moment it finishes, then a
+summary line, so watchers see partial progress; \fBgithub\fR emits GitHub
+Actions workflow commands (failing checks as ::error annotations plus a
+::notice summary).
 .TP
 .B -j, --jobs \fIN\fR
 Run file, command, and directory checks across up to \fIN\fR worker threads;
 Git checks always run last and sequentially. Default \fB1\fR (sequential).
 \fB0\fR uses all available CPUs. Report order always matches spec order
 regardless of \fIN\fR.
+.TP
+.B --fail-fast
+Stop running remaining checks after the first failure. Skipped checks are
+reported as skipped, never as passed, and the run still fails overall. With
+\fB--jobs\fR > 1 the set of checks that still runs is timing-dependent.
+.TP
+.B --incremental
+Re-check only files changed since \fBHEAD\fR, replaying cached results for
+unchanged files. Requires \fB--base\fR inside a Git repository with at least
+one commit, and implies the default \fB--cache-dir\fR when none is given.
+Applies to \fB--spec\fR and \fB--json\fR runs.
+.TP
+.B --cache-dir \fIDIR\fR
+Directory for the result cache (one JSON file per \fB--base\fR). Replays
+file-check results for identical file content; entries are keyed by the
+deliver version plus the full check definition, so any spec edit invalidates
+them. Replayed results are marked \fB(cached)\fR. Cache failures are never
+fatal.
 .TP
 .B --color \fIauto|always|never\fR
 Control ANSI color in text output. The default, \fBauto\fR, enables color only
@@ -90,6 +159,16 @@ for interactive text runs.
 .TP
 .B --strict
 Exit with status 1 when any validation check fails.
+.TP
+.B --attest \fIPATH\fR
+Write an attestation bundle to PATH after a passing run: spec and report
+hashes, tallies, the git commit when available, a timestamp, and an Ed25519
+signature when \fB--attest-key\fR is supplied. Runs that do not pass never
+produce a bundle. Status is printed to stderr.
+.TP
+.B --attest-key \fIPATH\fR
+Ed25519 private key file (from \fBdeliver keygen\fR) used to sign the
+\fB--attest\fR bundle.
 .SH EXIT STATUS
 .TP
 .B 0
