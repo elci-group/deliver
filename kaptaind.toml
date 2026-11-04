@@ -17,8 +17,11 @@ d = 0.20
 r = 0.15
 
 [push]
-enabled = false
-branch = "master"
+enabled = true
+branch = "integration/goya-wave-01"
+
+[capabilities]
+network_push = true
 
 [angler.git_hooks]
 enabled = false

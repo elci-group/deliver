@@ -100,6 +100,7 @@ dependencies = [
  "goya-bridge-physics",
  "goya-chroma",
  "goya-ir",
+ "goya-lang",
  "goya-layout",
  "goya-rpi",
  "goya-runtime",
@@ -113,6 +114,13 @@ dependencies = [
 [[package]]
 name = "goya-ir"
 version = "0.1.0"
+
+[[package]]
+name = "goya-lang"
+version = "0.1.0"
+dependencies = [
+ "goya-chroma",
+]
 
 [[package]]
 name = "goya-layout"

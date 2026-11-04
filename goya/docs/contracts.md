@@ -221,3 +221,39 @@ three-button acceptance geometry depends on it.
 `goya-ir::parse` is now under a deterministic 20 000-input mutation fuzzer
 (totality + determinism + root-integrity assertions). Its first run caught
 `root N` with an undeclared N being accepted — fixed in the same commit.
+
+---
+
+## GY-LANG/1 — Scene language, RUGID-compatible (`crates/goya-lang`)
+
+Status: Candidate. Architecture decision: the Goya surface language adopts
+the RUGID scene grammar (github.com/elci-group/RUGID) in place of the
+Wave-1 line-oriented module DSL. `goya-ir`'s programmatic API is unchanged;
+both paths feed the same runtime/layout/render pipeline.
+
+- Grammar: `@ontology <name> { ... }` root; `@cell <name> { ... }` surfaces;
+  `@button <name> { ... }` interactive elements; `//` comments; inline
+  `prop: value;` sequences; property blocks terminated by newline or `;`.
+- Geometry: `position: (x, y, z)` / `extent: (w, h, d)` in absolute points,
+  parent-origin-relative; `position_p` / `extent_p` in 0..1 fractions of
+  the parent. Undeclared extent fills the parent. Geometry clamps into the
+  parent. Millipoint scale matches GY-LAYOUT/1 (1 pt = 1000 mp).
+- Appearance: `fill`/`stroke` hex colours (`#rgb`, `#rrggbb`, `#rrggbbaa`),
+  `stroke-width`, `text`, `text-size`, `text-anchor: start|middle|end`.
+- Forward compatibility: `@template` and `@interaction` blocks are parsed
+  and skipped (visual state work is Wave 3); unknown properties are
+  consumed and ignored, never fatal.
+- Totality: parse + layout never panic on any input — 10,000-input
+  deterministic mutation fuzzer enforces it.
+- Hit testing: `hit_test(&Frame, x_mp, y_mp) -> Option<button-name>` with
+  depth-first later-drawn-wins order.
+- Demo: `cargo run --bin scene [--file app.gscene] [--live]` builds a
+  clickable GUI from a scene file.
+
+## Language decision record
+
+The line-oriented DSL (GY-IR/1 parser) remains supported for backward
+compatibility and programmatic use. New GUI authoring targets GY-LANG/1.
+Unification plan: a GY-IR/2 amendment will define a shared node table so
+both frontends lower into one IR; scheduled Wave 2c alongside the EDC
+canonical IR work.
