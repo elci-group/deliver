@@ -407,3 +407,43 @@ Implemented as four new crates (all std-only, Candidate status):
 | crates/goya-rars | Efficiency Swarm M2 (RARS) |
 | crates/goya-csr | Efficiency Swarm M3 (CSR) |
 | crates/goya-hcar | Efficiency Swarm M4 (HCAR) |
+
+---
+
+## GY-FSC/1 — Formatting Similarity Compression (`crates/goya-fsc`)
+
+Status: Candidate. Implements GY-TYP-002 (supersedes the DSC portions of
+GY-TYP-001): compression operates on FORMATTING similarity, never glyph
+shapes.
+
+- `ProfileStore`/`FormattingProfile`: shared immutable profiles with
+  parent inheritance. Resolution walks root→leaf, deeper overrides win;
+  cycles and missing parents return errors, never loop or panic.
+- **Inheritance-aware identity** (§3, the crucial distinction): profile
+  identity = resolved values + LEAF-explicit property set + ancestry
+  depth. Two objects that look identical today but override at different
+  levels are distinct — a theme/parent change affects them differently.
+- `FormattedText` in-object variance (§4): base profile + `Vec` of typed
+  range deltas; `effective_at(pos) = F₀ ⊕ Δ(pos)`.
+- Stable anchors (§4): insertion inside (or at start of) a delta extends
+  it — typing at a styled boundary adopts the style; insertion before
+  shifts; deletion intersects/clamps. Content edits are materialised with
+  char-boundary snapping; all offsets clamp; never panics.
+- Canonicalisation (§7): sort, drop empties, dedupe, merge adjacent
+  equal-override ranges.
+- Run-based rendering input (§7): `runs()` computes formatting runs from
+  the delta boundary set — O(d log d + d·r), not per-character resolution.
+- Invalidation table (§6): property → (reshape, relayout, reraster,
+  recompose). Colour/opacity/underline = compose-only; family/size/weight
+  = full; spacing/line-height/align = relayout+recompose with mask reuse.
+  LCPE bridge: `lcpe_property_mask` feeds goya-change PropertyMask bits.
+- Acceptance (§10, unit-tested): 100,000 chars, 1,000 variations, one base
+  style — global recolour leaves run structure identical (compose-only);
+  one-word weight change is local reshape scope; insertion inside a
+  formatted range preserves anchors (delta extends 100..120 → 100..123).
+- 11 tests incl. a bounded 800-iteration totality fuzz.
+
+## Ownership
+| Path | Owner |
+|---|---|
+| crates/goya-fsc | Typography Swarm T1 (FSC) |

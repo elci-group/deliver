@@ -105,6 +105,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "goya-fsc"
+version = "0.1.0"
+dependencies = [
+ "goya-change",
+]
+
+[[package]]
 name = "goya-hcar"
 version = "0.1.0"
 
