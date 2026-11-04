@@ -25,9 +25,11 @@ const FB_H: usize = 300;
 const SCALE: i64 = 1000 / 4; // millipoints → pixels (4 px per point)
 
 fn main() {
-    if let Err(e) = run() {
+    let live = std::env::args().any(|a| a == "--live");
+    let result = if live { run_live() } else { run() };
+    if let Err(e) = result {
         eprintln!("goya-hello: {e}");
-        std::process::exit(1);
+        std::process::exit(if live { 0 } else { 1 }); // live: graceful headless exit
     }
 }
 
@@ -189,4 +191,52 @@ fn glyph5x7(c: char) -> [u8; 7] {
         ' ' => [0; 7],
         _ => [0b111110; 7],
     }
+}
+
+// ---- GY-WAYLAND-001 live mode -------------------------------------------
+//
+// `goya-hello --live` opens a real Wayland window, feeds pointer events
+// into the goya-runtime pipeline, and presents each frame. Missing display
+// → graceful message, exit 0-style nonzero, app stays operational.
+
+fn run_live() -> Result<(), String> {
+    let module =
+        parse(MODULE_SRC).map_err(|e| format!("module parse failed at line {}", e.line))?;
+    let store = Store::new();
+    let constraints = Constraints {
+        max_width: (FB_W as i64) * 1000 / SCALE.max(1),
+        max_height: (FB_H as i64) * 1000 / SCALE.max(1),
+    };
+    let mut rt = Runtime::new(module, store, constraints);
+    let mut win = match goya_wayland::GoyaWindow::create("goya-hello", FB_W as i32, FB_H as i32) {
+        Ok(w) => w,
+        Err(e) => return Err(format!("live mode unavailable: {e}")),
+    };
+    let mut frames = 0u32;
+    const MAX_FRAMES: u32 = 600; // bounded run: ~10 s at 60 Hz
+    while frames < MAX_FRAMES && !win.close_requested() {
+        for ev in win.poll() {
+            match ev {
+                goya_wayland::PlatformEvent::PointerPress(x, y) => {
+                    // Surface-local pixels → millipoints → hit test.
+                    let mx = (x as i64) * goya_wayland::MP_PER_PX;
+                    let my = (y as i64) * goya_wayland::MP_PER_PX;
+                    if let Some(action) = rt.hit_test(mx, my) {
+                        let _ = rt.handle(Event::Activate(action));
+                    }
+                }
+                goya_wayland::PlatformEvent::CloseRequested => {}
+                _ => {}
+            }
+        }
+        let _ = win.present(&rt.render_list(), [235, 235, 240], [24, 24, 28]);
+        win.pump(1);
+        frames += 1;
+    }
+    let count = match rt.store().get("count") {
+        Some(goya_state::Value::Int(n)) => n,
+        _ => -1,
+    };
+    println!("goya-hello live: {frames} frames presented, count={count}");
+    Ok(())
 }

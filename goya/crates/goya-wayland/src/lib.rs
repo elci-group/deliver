@@ -1,0 +1,646 @@
+//! GY-WAYLAND/1 — Native windowing host abstraction (Wave 1 completion).
+//!
+//! Minimal, honest scope per GY-WAYLAND-001: one window, pointer events
+//! mapped to surface-local pixels, and the goya render list presented via a
+//! shared-memory buffer. This crate is where Goya's zero-dependency policy
+//! deliberately ends — the Wayland host layer uses the official Smithay
+//! client bindings rather than a hand-rolled wire protocol, because a
+//! protocol reimplementation is a security liability, not an asset
+//! (GOYA §13: Linux compositor fragmentation).
+
+use goya_layout::Rect;
+use rustix::fd::OwnedFd;
+use rustix::fs::{ftruncate, memfd_create, MemfdFlags};
+use rustix::mm::{mmap, munmap, MapFlags, ProtFlags};
+use std::os::fd::AsFd;
+use wayland_client::protocol::{
+    wl_buffer::WlBuffer,
+    wl_compositor::WlCompositor,
+    wl_pointer::{self, WlPointer},
+    wl_registry::{self, WlRegistry},
+    wl_seat::{self, Capability, WlSeat},
+    wl_shm::{self, WlShm},
+    wl_shm_pool::{self, WlShmPool},
+    wl_surface::{self, WlSurface},
+};
+use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
+use wayland_protocols::xdg::shell::client::{
+    xdg_surface::{self, XdgSurface},
+    xdg_toplevel::{self, XdgToplevel},
+    xdg_wm_base::{self, XdgWmBase},
+};
+
+/// Contract identifier implemented by this crate.
+pub const WAYLAND_CONTRACT: &str = "GY-WAYLAND/1";
+
+/// Millipoints per pixel, matching goya-hello's 4 px per point.
+pub const MP_PER_PX: i64 = 250;
+
+/// Pointer/button events translated from the compositor, surface-local.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlatformEvent {
+    PointerMove(f64, f64),
+    PointerPress(f64, f64),
+    PointerRelease(f64, f64),
+    Configured,
+    CloseRequested,
+}
+
+/// Wayland failures surfaced as data, never panics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaylandError {
+    /// No compositor reachable (headless/CI): the app stays operational.
+    NoDisplay,
+    MissingGlobal(&'static str),
+    ShmSetup(&'static str),
+}
+
+impl std::fmt::Display for WaylandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WaylandError::NoDisplay => write!(f, "no Wayland display reachable"),
+            WaylandError::MissingGlobal(g) => write!(f, "compositor lacks {g}"),
+            WaylandError::ShmSetup(e) => write!(f, "shared memory setup failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for WaylandError {}
+
+/// Shared-memory pixel buffer for one frame.
+struct ShmFrame {
+    _fd: OwnedFd,
+    map: *mut u8,
+    len: usize,
+    buffer: WlBuffer,
+}
+// The mapping is owned exclusively by this struct and lives as long as the fd.
+unsafe impl Send for ShmFrame {}
+
+impl ShmFrame {
+    fn new(
+        shm: &WlShm,
+        pool: &mut Option<WlShmPool>,
+        qh: &QueueHandle<GoyaWindowInner>,
+        width: i32,
+        height: i32,
+    ) -> Result<Self, WaylandError> {
+        let stride = width * 4;
+        let len = (stride * height) as usize;
+        let fd = memfd_create("goya-frame", MemfdFlags::CLOEXEC)
+            .map_err(|_| WaylandError::ShmSetup("memfd"))?;
+        ftruncate(&fd, len as u64).map_err(|_| WaylandError::ShmSetup("ftruncate"))?;
+        let map = unsafe {
+            mmap(
+                std::ptr::null_mut(),
+                len,
+                ProtFlags::READ | ProtFlags::WRITE,
+                MapFlags::SHARED,
+                &fd,
+                0,
+            )
+        }
+        .map_err(|_| WaylandError::ShmSetup("mmap"))? as *mut u8;
+        if pool.is_none() {
+            *pool = Some(shm.create_pool(fd.as_fd(), len as i32, qh, ()));
+        }
+        let pool_ref = pool.as_ref().unwrap();
+        let buffer =
+            pool_ref.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
+        Ok(ShmFrame {
+            _fd: fd,
+            map,
+            len,
+            buffer,
+        })
+    }
+
+    fn pixels_mut(&mut self) -> &mut [u32] {
+        unsafe { std::slice::from_raw_parts_mut(self.map.cast::<u32>(), self.len / 4) }
+    }
+}
+
+impl Drop for ShmFrame {
+    fn drop(&mut self) {
+        let _ = unsafe { munmap(self.map.cast(), self.len) };
+        self.buffer.destroy();
+    }
+}
+
+/// Everything the window needs, both application state and protocol objects.
+struct GoyaWindowInner {
+    width: i32,
+    height: i32,
+    configured: bool,
+    close_requested: bool,
+    events: Vec<PlatformEvent>,
+    globals: Vec<(u32, String)>,
+    compositor: Option<WlCompositor>,
+    shm: Option<WlShm>,
+    seat: Option<WlSeat>,
+    xdg_wm_base: Option<XdgWmBase>,
+    surface: Option<WlSurface>,
+    xdg_surface: Option<XdgSurface>,
+    toplevel: Option<XdgToplevel>,
+    pointer: Option<WlPointer>,
+    last_pointer: Option<(f64, f64)>,
+    pool: Option<WlShmPool>,
+    frame: Option<ShmFrame>,
+    ack_serial: u32,
+}
+
+impl GoyaWindowInner {
+    fn new(width: i32, height: i32) -> Self {
+        GoyaWindowInner {
+            width,
+            height,
+            configured: false,
+            close_requested: false,
+            events: Vec::new(),
+            globals: Vec::new(),
+            compositor: None,
+            shm: None,
+            seat: None,
+            xdg_wm_base: None,
+            surface: None,
+            xdg_surface: None,
+            toplevel: None,
+            pointer: None,
+            last_pointer: None,
+            pool: None,
+            frame: None,
+            ack_serial: 0,
+        }
+    }
+}
+
+/// Application-facing window: draw the runtime's render list, receive
+/// pointer events.
+pub struct GoyaWindow {
+    state: GoyaWindowInner,
+    queue: wayland_client::EventQueue<GoyaWindowInner>,
+}
+
+impl GoyaWindow {
+    /// Connect to the compositor and create a configured window.
+    pub fn create(title: &str, width: i32, height: i32) -> Result<Self, WaylandError> {
+        let Ok(conn) = Connection::connect_to_env() else {
+            return Err(WaylandError::NoDisplay);
+        };
+        let display = conn.display();
+        let mut queue = conn.new_event_queue::<GoyaWindowInner>();
+        let qh = queue.handle();
+        let _registry = display.get_registry(&qh, ());
+        let mut state = GoyaWindowInner::new(width, height);
+
+        // Roundtrip 1: collect globals from the registry.
+        queue
+            .roundtrip(&mut state)
+            .map_err(|_| WaylandError::NoDisplay)?;
+
+        // Bind the globals we need by interface name.
+        let mut compositor: Option<WlCompositor> = None;
+        let mut shm: Option<WlShm> = None;
+        let mut seat: Option<WlSeat> = None;
+        let mut wm_base: Option<XdgWmBase> = None;
+        for (name, interface) in &state.globals {
+            match interface.as_str() {
+                "wl_compositor" => compositor = Some(_registry.bind(*name, 1, &qh, ())),
+                "wl_shm" => shm = Some(_registry.bind(*name, 1, &qh, ())),
+                "wl_seat" => seat = Some(_registry.bind(*name, 1, &qh, ())),
+                "xdg_wm_base" => wm_base = Some(_registry.bind(*name, 1, &qh, ())),
+                _ => {}
+            }
+        }
+        state.globals.clear();
+        let compositor = compositor.ok_or(WaylandError::MissingGlobal("wl_compositor"))?;
+        let shm = shm.ok_or(WaylandError::MissingGlobal("wl_shm"))?;
+        let wm_base = wm_base.ok_or(WaylandError::MissingGlobal("xdg_wm_base"))?;
+
+        // Window objects.
+        let surface = compositor.create_surface(&qh, ());
+        let xdg_surface = wm_base.get_xdg_surface(&surface, &qh, ());
+        let toplevel = xdg_surface.get_toplevel(&qh, ());
+        toplevel.set_title(title.to_string());
+        state.surface = Some(surface.clone());
+        state.xdg_surface = Some(xdg_surface.clone());
+        state.toplevel = Some(toplevel.clone());
+        state.compositor = Some(compositor.clone());
+        state.shm = Some(shm.clone());
+        state.xdg_wm_base = Some(wm_base.clone());
+        state.seat = seat.clone();
+        // Initial commit: the compositor responds with a configure.
+        surface.commit();
+
+        // Roundtrips until configured.
+        for _ in 0..50 {
+            queue
+                .roundtrip(&mut state)
+                .map_err(|_| WaylandError::NoDisplay)?;
+            if state.configured {
+                break;
+            }
+        }
+        if !state.configured {
+            return Err(WaylandError::MissingGlobal("configure"));
+        }
+        xdg_surface.ack_configure(state.ack_serial);
+        surface.commit();
+
+        // Pointer, if the seat has one.
+        if let Some(seat) = seat {
+            state.pointer = Some(seat.get_pointer(&qh, ()));
+        }
+
+        Ok(GoyaWindow { state, queue })
+    }
+
+    /// Map the runtime's render list into shared memory and present it.
+    pub fn present(
+        &mut self,
+        primitives: &[goya_runtime::Primitive],
+        fg: [u8; 3],
+        bg: [u8; 3],
+    ) -> Result<(), WaylandError> {
+        if self.state.frame.is_none() {
+            let shm = self
+                .state
+                .shm
+                .clone()
+                .ok_or(WaylandError::MissingGlobal("wl_shm"))?;
+            let qh = self.queue.handle();
+            self.state.frame = Some(ShmFrame::new(
+                &shm,
+                &mut self.state.pool,
+                &qh,
+                self.state.width,
+                self.state.height,
+            )?);
+        }
+        let frame = self.state.frame.as_mut().unwrap();
+        let pixels = frame.pixels_mut();
+        pixels.fill(argb(bg));
+        for prim in primitives {
+            match prim {
+                goya_runtime::Primitive::Panel(_) => {}
+                goya_runtime::Primitive::Text(r, s) => {
+                    fill_rect(pixels, self.state.width, self.state.height, r, [16, 16, 20]);
+                    draw_glyphs(pixels, self.state.width, self.state.height, r, s, fg);
+                }
+                goya_runtime::Primitive::Button(r, s) => {
+                    fill_rect(
+                        pixels,
+                        self.state.width,
+                        self.state.height,
+                        r,
+                        [80, 100, 180],
+                    );
+                    draw_glyphs(pixels, self.state.width, self.state.height, r, s, fg);
+                }
+            }
+        }
+        let surface = self
+            .state
+            .surface
+            .as_ref()
+            .ok_or(WaylandError::MissingGlobal("surface"))?;
+        surface.attach(Some(&frame.buffer), 0, 0);
+        surface.damage(0, 0, self.state.width, self.state.height);
+        surface.commit();
+        Ok(())
+    }
+
+    /// Dispatch pending compositor messages and return queued platform events.
+    pub fn poll(&mut self) -> Vec<PlatformEvent> {
+        let _ = self.queue.dispatch_pending(&mut self.state);
+        let _ = self.queue.flush();
+        std::mem::take(&mut self.state.events)
+    }
+
+    /// Run bounded dispatch roundtrips so configure/pointer events land.
+    pub fn pump(&mut self, rounds: u32) {
+        for _ in 0..rounds {
+            let _ = self.queue.dispatch_pending(&mut self.state);
+            let _ = self.queue.roundtrip(&mut self.state);
+            if self.state.close_requested {
+                break;
+            }
+        }
+    }
+
+    /// Whether the window was closed.
+    pub fn close_requested(&self) -> bool {
+        self.state.close_requested
+    }
+
+    /// Compositor width in pixels (fixed in this minimal scope).
+    pub fn size(&self) -> (i32, i32) {
+        (self.state.width, self.state.height)
+    }
+}
+
+fn argb(rgb: [u8; 3]) -> u32 {
+    0xFF00_0000 | ((rgb[2] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[0] as u32
+}
+
+fn fill_rect(pixels: &mut [u32], win_w: i32, win_h: i32, r: &Rect, rgb: [u8; 3]) {
+    let a = argb(rgb);
+    let x0 = (r.x / MP_PER_PX).max(0);
+    let y0 = (r.y / MP_PER_PX).max(0);
+    let x1 = ((r.x + r.width) / MP_PER_PX).min(i64::from(win_w));
+    let y1 = ((r.y + r.height) / MP_PER_PX).min(i64::from(win_h));
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let idx = (y as usize) * (win_w as usize) + (x as usize);
+            if idx < pixels.len() {
+                pixels[idx] = a;
+            }
+        }
+    }
+}
+
+fn draw_glyphs(pixels: &mut [u32], win_w: i32, win_h: i32, r: &Rect, s: &str, rgb: [u8; 3]) {
+    let a = argb(rgb);
+    let ox = (r.x / MP_PER_PX + 2).max(0) as usize;
+    let oy = (r.y / MP_PER_PX + 2).max(0) as usize;
+    for (ci, ch) in s.chars().enumerate() {
+        let glyph = glyph5x7(ch);
+        for (gy, row) in glyph.iter().enumerate() {
+            for gx in 0..5 {
+                if row & (1 << (4 - gx)) != 0 {
+                    let x = ox + ci * 6 + gx;
+                    let y = oy + gy;
+                    if x < win_w as usize && y < win_h as usize {
+                        let idx = y * (win_w as usize) + x;
+                        if idx < pixels.len() {
+                            pixels[idx] = a;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 5x7 glyphs (leftmost pixel = bit 4); unknown characters render as a box.
+fn glyph5x7(c: char) -> [u8; 7] {
+    match c {
+        'a' => [
+            0b011110, 0b100010, 0b100010, 0b111110, 0b100010, 0b100010, 0b100010,
+        ],
+        'c' => [
+            0b011110, 0b100000, 0b100000, 0b100000, 0b100000, 0b100000, 0b011110,
+        ],
+        'd' => [
+            0b111100, 0b100010, 0b100010, 0b100010, 0b100010, 0b100010, 0b111100,
+        ],
+        'e' => [
+            0b111110, 0b100000, 0b100000, 0b111100, 0b100000, 0b100000, 0b111110,
+        ],
+        'g' => [
+            0b011110, 0b100000, 0b100000, 0b101110, 0b100010, 0b100010, 0b011110,
+        ],
+        'h' => [
+            0b100010, 0b100010, 0b100010, 0b111110, 0b100010, 0b100010, 0b100010,
+        ],
+        'i' => [
+            0b010000, 0b000000, 0b010000, 0b010000, 0b010000, 0b010000, 0b011110,
+        ],
+        'l' => [
+            0b010000, 0b010000, 0b010000, 0b010000, 0b010000, 0b010000, 0b011110,
+        ],
+        'm' => [
+            0b110011, 0b111111, 0b101101, 0b101101, 0b100001, 0b100001, 0b100001,
+        ],
+        'n' => [
+            0b100010, 0b110010, 0b101010, 0b100110, 0b100010, 0b100010, 0b100010,
+        ],
+        'o' => [
+            0b011110, 0b100010, 0b100010, 0b100010, 0b100010, 0b100010, 0b011110,
+        ],
+        'r' => [
+            0b100100, 0b101000, 0b110000, 0b100000, 0b100000, 0b100000, 0b100000,
+        ],
+        't' => [
+            0b010000, 0b010000, 0b111110, 0b010000, 0b010000, 0b010010, 0b001100,
+        ],
+        'u' => [
+            0b100010, 0b100010, 0b100010, 0b100010, 0b100010, 0b100010, 0b011110,
+        ],
+        'v' => [
+            0b100010, 0b100010, 0b100010, 0b100010, 0b010100, 0b010100, 0b001000,
+        ],
+        'y' => [
+            0b100010, 0b100010, 0b011110, 0b001000, 0b001000, 0b010000, 0b010000,
+        ],
+        ',' => [0, 0, 0, 0, 0b001100, 0b001000, 0b010000],
+        '=' => [0, 0, 0b111110, 0, 0b111110, 0, 0],
+        '!' => [
+            0b001000, 0b001000, 0b001000, 0b001000, 0b001000, 0, 0b001000,
+        ],
+        ' ' => [0; 7],
+        _ => [0b111110; 7],
+    }
+}
+
+// ---- Dispatch plumbing -------------------------------------------------
+
+impl Dispatch<WlRegistry, ()> for GoyaWindowInner {
+    fn event(
+        state: &mut Self,
+        _: &WlRegistry,
+        event: wl_registry::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wl_registry::Event::Global {
+            name, interface, ..
+        } = event
+        {
+            state.globals.push((name, interface));
+        }
+    }
+}
+
+impl Dispatch<WlCompositor, ()> for GoyaWindowInner {
+    fn event(
+        _: &mut Self,
+        _: &WlCompositor,
+        _: wayland_client::protocol::wl_compositor::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WlShm, ()> for GoyaWindowInner {
+    fn event(
+        _: &mut Self,
+        _: &WlShm,
+        _: wl_shm::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WlShmPool, ()> for GoyaWindowInner {
+    fn event(
+        _: &mut Self,
+        _: &WlShmPool,
+        _: wl_shm_pool::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WlBuffer, ()> for GoyaWindowInner {
+    fn event(
+        _: &mut Self,
+        _: &WlBuffer,
+        _: wayland_client::protocol::wl_buffer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<WlSurface, ()> for GoyaWindowInner {
+    fn event(
+        state: &mut Self,
+        _: &WlSurface,
+        _: wl_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        // Store the surface handle the first time we create one via create().
+        let _ = state;
+    }
+}
+
+impl Dispatch<XdgWmBase, ()> for GoyaWindowInner {
+    fn event(
+        _: &mut Self,
+        wm: &XdgWmBase,
+        event: xdg_wm_base::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        // Must answer pings or the compositor kills the client.
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+
+impl Dispatch<XdgSurface, ()> for GoyaWindowInner {
+    fn event(
+        state: &mut Self,
+        _: &XdgSurface,
+        event: xdg_surface::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            state.configured = true;
+            state.ack_serial = serial;
+            state.events.push(PlatformEvent::Configured);
+        }
+    }
+}
+
+impl Dispatch<XdgToplevel, ()> for GoyaWindowInner {
+    fn event(
+        state: &mut Self,
+        _: &XdgToplevel,
+        event: xdg_toplevel::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let xdg_toplevel::Event::Close = event {
+            state.close_requested = true;
+            state.events.push(PlatformEvent::CloseRequested);
+        }
+        // Configure events are accepted as-is in this minimal scope.
+    }
+}
+
+impl Dispatch<WlSeat, ()> for GoyaWindowInner {
+    fn event(
+        state: &mut Self,
+        seat: &WlSeat,
+        event: wl_seat::Event,
+        _: &(),
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        if let wl_seat::Event::Capabilities {
+            capabilities: WEnum::Value(caps),
+        } = event
+        {
+            if caps.contains(Capability::Pointer) && state.pointer.is_none() {
+                state.pointer = Some(seat.get_pointer(qh, ()));
+            }
+        }
+    }
+}
+
+impl Dispatch<WlPointer, ()> for GoyaWindowInner {
+    fn event(
+        state: &mut Self,
+        _: &WlPointer,
+        event: wl_pointer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter {
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                state.last_pointer = Some((surface_x, surface_y));
+            }
+            wl_pointer::Event::Motion {
+                surface_x,
+                surface_y,
+                ..
+            } => {
+                state.last_pointer = Some((surface_x, surface_y));
+                state
+                    .events
+                    .push(PlatformEvent::PointerMove(surface_x, surface_y));
+            }
+            wl_pointer::Event::Button {
+                button: 0x110,
+                state: WEnum::Value(bs),
+                ..
+            } => {
+                if let Some((x, y)) = state.last_pointer {
+                    match bs {
+                        wl_pointer::ButtonState::Pressed => {
+                            state.events.push(PlatformEvent::PointerPress(x, y));
+                        }
+                        wl_pointer::ButtonState::Released => {
+                            state.events.push(PlatformEvent::PointerRelease(x, y));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            wl_pointer::Event::Leave { .. } => state.last_pointer = None,
+            _ => {}
+        }
+    }
+}

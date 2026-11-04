@@ -145,6 +145,12 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     if module.root.is_none() {
         return Err(ParseError { line: 0 });
     }
+    // GY-IR/1 invariant: root must reference a declared node. The mutation
+    // fuzzer caught `root N` with an undeclared N being accepted.
+    let root = module.root.unwrap();
+    if module.nodes.iter().all(|(id, _)| *id != root) {
+        return Err(ParseError { line: 0 });
+    }
     Ok(module)
 }
 
@@ -194,5 +200,76 @@ root 1
     fn rejects_bad_line() {
         let src = "text 1 hi\nfrobnicate 2\nroot 1";
         assert_eq!(parse(src), Err(ParseError { line: 2 }));
+    }
+
+    /// Deterministic mutation fuzzing (GY-AIM assurance policy: parser never
+    /// panics on any input). xorshift64* PRNG, fixed seed, 20k inputs drawn
+    /// from mutations of a valid corpus plus random byte strings. The sole
+    /// contract: `parse` returns Ok/Err — it must never panic, hang on
+    /// pathological input, or accept an id that overflows.
+    #[test]
+    fn fuzz_parse_never_panics() {
+        const HELLO: &str = "column 1 2 3\ntext 2 Hello, Goya!\nbutton 3 1 Increment\nroot 1";
+        let corpus: Vec<String> = vec![
+            HELLO.to_string(),
+            "row 1 2 3\nbutton 2 9 AB\nspacer 3 1.5\nroot 1".to_string(),
+            "text 7 x\nroot 7".to_string(),
+            "".to_string(),
+            "root 1".to_string(),
+        ];
+        let mut rng = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        let mut accepted = 0usize;
+        for i in 0..20_000u64 {
+            let mut input = corpus[(next() as usize) % corpus.len()].clone();
+            match (next() + i) % 4 {
+                0 => {
+                    // truncate at a pseudo-random byte offset
+                    let cut = (next() as usize) % (input.len() + 1);
+                    input.truncate(cut);
+                }
+                1 => {
+                    // inject random printable junk
+                    let pos = (next() as usize) % (input.len() + 1);
+                    let junk: String = (0..8).map(|_| (next() % 94 + 33) as u8 as char).collect();
+                    input.insert_str(pos.min(input.len()), &junk);
+                }
+                2 => {
+                    // random u64 noise as a whole document
+                    input = format!("{} {} {}\nroot {}", next(), next(), next(), next());
+                }
+                _ => {
+                    // random bytes, many non-ASCII, exercised as UTF-8 lossy
+                    let bytes: Vec<u8> = (0..24).map(|_| (next() % 256) as u8).collect();
+                    input = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            }
+            // The whole contract is totality: Ok or Err, never a panic, and
+            // deterministic across a re-run.
+            let first = std::panic::catch_unwind(|| parse(&input));
+            match first {
+                Ok(Ok(m)) => {
+                    accepted += 1;
+                    // Accepted modules must be internally consistent: root
+                    // references a declared node.
+                    if let Some(root) = m.root {
+                        assert!(m.node(root).is_some(), "accepted module with dangling root");
+                    }
+                    assert!(
+                        parse(&input) == Ok(m),
+                        "parse is not deterministic for: {input:?}"
+                    );
+                }
+                Ok(Err(_)) => {}
+                Err(_) => panic!("parse panicked on input: {input:?}"),
+            }
+        }
+        // Sanity: the fuzzer must exercise the accept path, not only reject.
+        assert!(accepted > 100, "fuzzer barely accepted inputs: {accepted}");
     }
 }

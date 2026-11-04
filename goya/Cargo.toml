@@ -24,6 +24,7 @@ members = [
     "crates/goya-settlement",
     "crates/goya-artifact",
     "crates/goya-watermark",
+    "crates/goya-wayland",
 ]
 
 [workspace.package]
@@ -54,6 +55,7 @@ goya-economics = { path = "crates/goya-economics" }
 goya-settlement = { path = "crates/goya-settlement" }
 goya-artifact = { path = "crates/goya-artifact" }
 goya-watermark = { path = "crates/goya-watermark" }
+goya-wayland = { path = "crates/goya-wayland" }
 
 [profile.release]
 debug = true

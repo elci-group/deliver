@@ -116,6 +116,14 @@ fn measure_and_place(
                     cursor_x += CHILD_SPACING;
                 }
                 let remaining = (max_width - cursor_x - CONTAINER_PADDING).max(0);
+                // A spacer inside a row is a horizontal gap along the
+                // parent's axis (direction-aware spacer semantics).
+                if let Some(Node::Spacer { size }) = module.node(*child) {
+                    let mp = (*size * 1000.0) as i64;
+                    place(frame, *child, x + cursor_x, y + CONTAINER_PADDING, mp, 0);
+                    cursor_x += mp;
+                    continue;
+                }
                 let (w, h) = measure_and_place(
                     module,
                     *child,
@@ -180,6 +188,35 @@ mod tests {
         let button = frame.rect(NodeId(3)).unwrap();
         assert!(button.y > text.y, "button must sit below text");
         assert_eq!(text.x, button.x, "column children share x origin");
+    }
+
+    #[test]
+    fn row_spacer_is_a_horizontal_gap() {
+        let m = parse("row 1 2 3\nbutton 2 9 AB\nspacer 3 10.0\nroot 1").unwrap();
+        let frame = layout(
+            &m,
+            Constraints {
+                max_width: 800_000,
+                max_height: 600_000,
+            },
+        );
+        let before = frame.rect(NodeId(2)).unwrap();
+        // A second button after the spacer starts beyond it, not adjacent.
+        let m2 = parse("row 1 2 3 4\nbutton 2 9 AB\nspacer 3 10.0\nbutton 4 8 CD\nroot 1").unwrap();
+        let frame2 = layout(
+            &m2,
+            Constraints {
+                max_width: 800_000,
+                max_height: 600_000,
+            },
+        );
+        let b2 = frame2.rect(NodeId(4)).unwrap();
+        assert!(
+            b2.x >= before.x + 10_000,
+            "spacer must push siblings along the row axis: {} vs {}",
+            b2.x,
+            before.x
+        );
     }
 
     #[test]

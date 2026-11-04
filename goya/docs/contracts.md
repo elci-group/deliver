@@ -171,3 +171,53 @@ Three separate identities (byte hash FNV-1a, perceptual 8×8 block-mean hash, pr
 | crates/goya-determinism, goya-executable | Swarm (EDC) |
 | crates/goya-x402, goya-economics, goya-settlement | Swarm (x402) |
 | crates/goya-artifact, goya-watermark | Swarm L (Artifact Identity) |
+
+---
+
+## GY-WAYLAND/1 — Native windowing host abstraction (`crates/goya-wayland`)
+
+Status: Candidate (Swarm D — Platform). Completes GY-WAYLAND-001, the gate to release 0.1.
+
+- Provides: `GoyaWindow::create(title, w, h)` → configured xdg-shell toplevel;
+  `present(&[Primitive])` renders the runtime's render list into a
+  shared-memory (wl_shm/memfd) buffer; `poll()`/`pump()` yield
+  `PlatformEvent::{PointerMove, PointerPress, PointerRelease, Configured,
+  CloseRequested}` with surface-local pixel coordinates.
+- Consumers map pixels→millipoints (`MP_PER_PX = 250`) and route presses
+  through `goya_runtime::Runtime::hit_test`.
+- Policy shift, deliberate and recorded: the host layer depends on the
+  official Smithay client bindings (wayland-client, wayland-protocols,
+  rustix) rather than a hand-rolled wire protocol. The zero-dependency
+  policy continues to apply to the foundation crates.
+- Graceful degradation: `WaylandError::NoDisplay` when no compositor is
+  reachable — the application remains operational headless.
+
+## Direction-aware spacer refinement (GY-LAYOUT/1 amendment)
+
+A `Spacer` inside a `Row` is now a horizontal gap along the parent's axis
+(previously it only contributed height, making it invisible in rows).
+Deterministic and covered by `row_spacer_is_a_horizontal_gap`. The ARSEM
+three-button acceptance geometry depends on it.
+
+## Deferred-work DAG (explicit wave assignments)
+
+| Work package | Wave | Unblocks |
+|---|---|---|
+| ~~GY-WAYLAND-001 live surface~~ | 1 (done) | 0.1 release gate |
+| PipeWire audio adapter (`goya-audio-linux` backend) | 2a | real ARSEM output |
+| Hot-swap supervisor + Tov adapter | 2b | release 0.2 |
+| EDC: canonical IR lowering + bytecode backend | 2c | compiled execution units |
+| Vico Vee library extraction | 3a | containment contracts |
+| RUGID / 3form / Mesut / Theosis adapters | 3b | release 0.3–0.4 |
+| C2PA manifest compatibility (provenance signing) | 3c | artifact provenance |
+| HRTF / multichannel elevation cues | 3d | beyond-stereo ARSEM |
+| RPI Level-2 learned anticipation (opt-in) | 3e | anticipatory runtime |
+| Accessibility conformance suite (WCAG, screen readers) | 4 | release 0.6 |
+| Packaging, SDK, Studio, distribution | 4 | release 0.6–1.0 |
+| Adversarial robustness corpus for watermark detection | 4 | no robustness claim without corpus |
+
+## Assurance note
+
+`goya-ir::parse` is now under a deterministic 20 000-input mutation fuzzer
+(totality + determinism + root-integrity assertions). Its first run caught
+`root N` with an undeclared N being accepted — fixed in the same commit.
