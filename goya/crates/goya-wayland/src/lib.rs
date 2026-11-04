@@ -16,6 +16,7 @@ use std::os::fd::AsFd;
 use wayland_client::protocol::{
     wl_buffer::WlBuffer,
     wl_compositor::WlCompositor,
+    wl_keyboard::{self, WlKeyboard},
     wl_pointer::{self, WlPointer},
     wl_registry::{self, WlRegistry},
     wl_seat::{self, Capability, WlSeat},
@@ -42,6 +43,10 @@ pub enum PlatformEvent {
     PointerMove(f64, f64),
     PointerPress(f64, f64),
     PointerRelease(f64, f64),
+    /// Printable character typed on the keyboard (US layout subset).
+    KeyChar(char),
+    /// Compositor resized the window to new pixel dimensions.
+    Resized(i32, i32),
     Configured,
     CloseRequested,
 }
@@ -143,7 +148,9 @@ struct GoyaWindowInner {
     xdg_surface: Option<XdgSurface>,
     toplevel: Option<XdgToplevel>,
     pointer: Option<WlPointer>,
+    keyboard: Option<WlKeyboard>,
     last_pointer: Option<(f64, f64)>,
+    shift: bool,
     pool: Option<WlShmPool>,
     frame: Option<ShmFrame>,
     ack_serial: u32,
@@ -166,7 +173,9 @@ impl GoyaWindowInner {
             xdg_surface: None,
             toplevel: None,
             pointer: None,
+            keyboard: None,
             last_pointer: None,
+            shift: false,
             pool: None,
             frame: None,
             ack_serial: 0,
@@ -247,9 +256,10 @@ impl GoyaWindow {
         xdg_surface.ack_configure(state.ack_serial);
         surface.commit();
 
-        // Pointer, if the seat has one.
+        // Pointer and keyboard, if the seat has them.
         if let Some(seat) = seat {
             state.pointer = Some(seat.get_pointer(&qh, ()));
+            state.keyboard = Some(seat.get_keyboard(&qh, ()));
         }
 
         Ok(GoyaWindow { state, queue })
@@ -571,7 +581,21 @@ impl Dispatch<XdgToplevel, ()> for GoyaWindowInner {
             state.close_requested = true;
             state.events.push(PlatformEvent::CloseRequested);
         }
-        // Configure events are accepted as-is in this minimal scope.
+        if let xdg_toplevel::Event::Configure { width, height, .. } = event {
+            if (width > 0 && width != state.width) || (height > 0 && height != state.height) {
+                if width > 0 {
+                    state.width = width;
+                }
+                if height > 0 {
+                    state.height = height;
+                }
+                // Drop the fixed-size frame: the next present() reallocates.
+                state.frame = None;
+                state
+                    .events
+                    .push(PlatformEvent::Resized(state.width, state.height));
+            }
+        }
     }
 }
 
@@ -591,6 +615,202 @@ impl Dispatch<WlSeat, ()> for GoyaWindowInner {
             if caps.contains(Capability::Pointer) && state.pointer.is_none() {
                 state.pointer = Some(seat.get_pointer(qh, ()));
             }
+        }
+    }
+}
+
+/// US QWERTY evdev keycode → printable char, honouring shift.
+/// Subset contract: printable ASCII only; unlisted keys yield None.
+fn key_char(keycode: u32, shift: bool) -> Option<char> {
+    let letter = |base: u8, off: u32| -> char {
+        let c = (base + off as u8) as char;
+        if shift {
+            c.to_ascii_uppercase()
+        } else {
+            c
+        }
+    };
+    // evdev US QWERTY keycodes.
+    let c = match keycode {
+        16..=25 => return Some(letter(b'q', keycode - 16)), // q..p
+        30..=38 => return Some(letter(b'a', keycode - 30)), // a..l
+        44..=50 => {
+            // z x c v b n m — not ASCII-contiguous; explicit table.
+            let row = ['z', 'x', 'c', 'v', 'b', 'n', 'm'];
+            let mut c = row[(keycode - 44) as usize];
+            if shift {
+                c = c.to_ascii_uppercase();
+            }
+            return Some(c);
+        }
+        2 => {
+            if shift {
+                '!'
+            } else {
+                '1'
+            }
+        }
+        3 => {
+            if shift {
+                '@'
+            } else {
+                '2'
+            }
+        }
+        4 => {
+            if shift {
+                '#'
+            } else {
+                '3'
+            }
+        }
+        5 => {
+            if shift {
+                '$'
+            } else {
+                '4'
+            }
+        }
+        6 => {
+            if shift {
+                '%'
+            } else {
+                '5'
+            }
+        }
+        7 => {
+            if shift {
+                '^'
+            } else {
+                '6'
+            }
+        }
+        8 => {
+            if shift {
+                '&'
+            } else {
+                '7'
+            }
+        }
+        9 => {
+            if shift {
+                '*'
+            } else {
+                '8'
+            }
+        }
+        10 => {
+            if shift {
+                '('
+            } else {
+                '9'
+            }
+        }
+        11 => {
+            if shift {
+                ')'
+            } else {
+                '0'
+            }
+        }
+        12 => {
+            if shift {
+                '_'
+            } else {
+                '-'
+            }
+        }
+        13 => {
+            if shift {
+                '+'
+            } else {
+                '='
+            }
+        }
+        14 => '\u{8}', // backspace
+        28 => '\n',    // enter
+        39 => {
+            if shift {
+                ':'
+            } else {
+                ';'
+            }
+        } // semicolon
+        40 => {
+            if shift {
+                '"'
+            } else {
+                '\''
+            }
+        } // apostrophe
+        41 => {
+            if shift {
+                '~'
+            } else {
+                '`'
+            }
+        } // grave
+        42 | 54 => return None, // shift keys
+        43 => {
+            if shift {
+                '|'
+            } else {
+                '\\'
+            }
+        } // backslash
+        51 => {
+            if shift {
+                '<'
+            } else {
+                ','
+            }
+        }
+        52 => {
+            if shift {
+                '>'
+            } else {
+                '.'
+            }
+        }
+        53 => {
+            if shift {
+                '?'
+            } else {
+                '/'
+            }
+        }
+        57 => ' ', // space
+        _ => return None,
+    };
+    Some(c)
+}
+
+impl Dispatch<WlKeyboard, ()> for GoyaWindowInner {
+    fn event(
+        state: &mut Self,
+        _: &WlKeyboard,
+        event: wl_keyboard::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            // xkb keymap fd arrives with format v1; we use the built-in US
+            // table instead, so the fd is closed without reading.
+            wl_keyboard::Event::Keymap { .. } => {}
+            wl_keyboard::Event::Modifiers { mods_depressed, .. } => {
+                state.shift = mods_depressed & 0x1 != 0; // ShiftMask
+            }
+            wl_keyboard::Event::Key {
+                key,
+                state: WEnum::Value(wl_keyboard::KeyState::Pressed),
+                ..
+            } => {
+                if let Some(c) = key_char(key, state.shift) {
+                    state.events.push(PlatformEvent::KeyChar(c));
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -642,5 +862,24 @@ impl Dispatch<WlPointer, ()> for GoyaWindowInner {
             wl_pointer::Event::Leave { .. } => state.last_pointer = None,
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::key_char;
+    #[test]
+    fn us_layout_spot_checks() {
+        assert_eq!(key_char(30, false), Some('a'));
+        assert_eq!(key_char(30, true), Some('A'));
+        assert_eq!(key_char(16, false), Some('q'));
+        assert_eq!(key_char(44, false), Some('z'));
+        assert_eq!(key_char(50, false), Some('m'));
+        assert_eq!(key_char(39, false), Some(';'));
+        assert_eq!(key_char(39, true), Some(':'));
+        assert_eq!(key_char(57, false), Some(' '));
+        assert_eq!(key_char(11, true), Some(')'));
+        assert_eq!(key_char(42, false), None); // shift itself
+        assert_eq!(key_char(999, false), None);
     }
 }

@@ -10,10 +10,12 @@
 //! Contract: parsing and layout are total (never panic on any input) and
 //! deterministic. See docs/contracts.md GY-LANG/1.
 
+mod hotswap;
 mod lexer;
 mod parser;
 mod scene;
 
+pub use hotswap::SceneStore;
 pub use lexer::{lex, LexError, Token, TokenKind};
 pub use parser::{parse, ParseError};
 pub use scene::{hit_test, layout, Anchor, CellKind, DrawNode, Scene, SceneCell, Vec3};

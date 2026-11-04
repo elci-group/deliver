@@ -285,3 +285,44 @@ Consequences for the DAG:
   package. VEE is a strong candidate to *be* the 0.3 "Contained Modules"
   enforcement point rather than a peer to integrate.
 - The Wave-1 evidence table row for Vico Vee is superseded by this section.
+
+---
+
+## Wave 2a/b additions (2026-11-04, afternoon wave)
+
+### GY-WAYLAND/1 amendments — keyboard & resize
+- `PlatformEvent::KeyChar(char)`: `wl_keyboard` wired with an evdev US
+  QWERTY subset table (letters, digits + shifted symbols, space, enter,
+  backspace, punctuation). The xkb keymap fd is accepted and closed — the
+  built-in table is the declared scope; full keymap/IME support is Wave 4.
+- `PlatformEvent::Resized(w, h)`: xdg toplevel configure carries new pixel
+  dimensions; the fixed-size shm frame is dropped and reallocated at the
+  next present, and the caller relayouts against the new viewport.
+
+### GY-AUDIO-LINUX/1 amendment — `PwCatOutput`
+Real audible output, achieved without C bindings: the adapter streams a
+canonical float32 WAV into the system PipeWire player (`pw-cat`,
+falling back to `paplay`, then `aplay`). Contract: spawn failure degrades
+to `DeviceState::Unavailable` (application stays operational — the
+directive's missing-device criterion); writes to a dead child return
+Ok(0) (graceful sample drop, no error storm). **Verified live**: a 0.25 s
+880 Hz tap played through the running PipeWire graph (12,000/12,000
+samples accepted). Example: `cargo run -p goya-audio-linux --example audio_smoke`.
+Demos: `cargo run --bin scene -- --live --sound` plays a tap on every
+button activation.
+
+### GY-LANG/1 amendment — `SceneStore` transactional hot-swap
+`goya_lang::SceneStore::swap(&str)` replaces the running scene only when
+the new source parses; a failed parse leaves scene and generation
+untouched (unit-tested both paths). Callers keep interaction state keyed
+by element name across swaps. Demo: `cargo run --bin scene -- --live
+--watch --file app.gscene` reloads on file change — verified live: a good
+edit bumped generation 1→2, a syntactically broken edit was rejected with
+the running scene retained. This is the Wave-2 acceptance criterion
+"running application accepts a validated external change, updates its UI
+and retains state across a failed reload".
+
+### Runtime note
+`goya-runtime` hello text now binds the `typed` state key (keyboard input
+path demonstrated end-to-end: compositor → KeyChar → `Event::Character`
+→ state transaction → relayout → presented frame).

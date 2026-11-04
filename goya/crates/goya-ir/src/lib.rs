@@ -142,16 +142,12 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
         };
         module.nodes.push((id, node));
     }
-    if module.root.is_none() {
-        return Err(ParseError { line: 0 });
+    // GY-IR/1 invariant: root must exist and reference a declared node. The
+    // mutation fuzzer caught `root N` with an undeclared N being accepted.
+    match module.root {
+        Some(root) if module.nodes.iter().any(|(id, _)| *id == root) => Ok(module),
+        _ => Err(ParseError { line: 0 }),
     }
-    // GY-IR/1 invariant: root must reference a declared node. The mutation
-    // fuzzer caught `root N` with an undeclared N being accepted.
-    let root = module.root.unwrap();
-    if module.nodes.iter().all(|(id, _)| *id != root) {
-        return Err(ParseError { line: 0 });
-    }
-    Ok(module)
 }
 
 fn parse_ids(parts: &[&str]) -> Option<Vec<NodeId>> {

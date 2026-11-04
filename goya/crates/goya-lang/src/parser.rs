@@ -64,9 +64,15 @@ impl P {
     }
 
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
-        match self.peek() {
-            Some(t) if t.kind == kind => Ok(self.bump().unwrap()),
-            _ => Err(ParseError { line: self.line() }),
+        if matches!(self.peek().map(|t| t.kind), Some(k) if k == kind) {
+            // peek() confirmed the token exists, so bump() cannot fail here;
+            // the impossible arm returns a parse error rather than panicking.
+            match self.bump() {
+                Some(t) => Ok(t),
+                None => Err(ParseError { line: self.line() }),
+            }
+        } else {
+            Err(ParseError { line: self.line() })
         }
     }
 
@@ -81,9 +87,13 @@ impl P {
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {
-        match self.peek() {
-            Some(t) if t.kind == TokenKind::Ident => Ok(self.bump().unwrap().text),
-            _ => Err(ParseError { line: self.line() }),
+        if matches!(self.peek().map(|t| t.kind), Some(TokenKind::Ident)) {
+            match self.bump() {
+                Some(t) => Ok(t.text),
+                None => Err(ParseError { line: self.line() }),
+            }
+        } else {
+            Err(ParseError { line: self.line() })
         }
     }
 

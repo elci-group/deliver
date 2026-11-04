@@ -121,15 +121,19 @@ impl Runtime {
     }
 
     fn relayout(&mut self) {
-        // Bind committed state into text nodes (hello shows the counter).
+        // Bind committed state into text nodes (hello shows counter + typing).
         let count = match self.store.get("count") {
             Some(Value::Int(n)) => n,
             _ => 0,
         };
+        let typed = match self.store.get("typed") {
+            Some(Value::Text(t)) => t,
+            _ => String::new(),
+        };
         for (_, node) in self.module.nodes.iter_mut() {
             if let Node::Text { content } = node {
                 if content.starts_with("Hello") {
-                    *content = format!("Hello, Goya! count={count}");
+                    *content = format!("Hello, Goya! count={count} typed={typed}");
                 }
             }
         }

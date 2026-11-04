@@ -225,6 +225,9 @@ fn run_live() -> Result<(), String> {
                         let _ = rt.handle(Event::Activate(action));
                     }
                 }
+                goya_wayland::PlatformEvent::KeyChar(c) => {
+                    let _ = rt.handle(Event::Character(c));
+                }
                 goya_wayland::PlatformEvent::CloseRequested => {}
                 _ => {}
             }

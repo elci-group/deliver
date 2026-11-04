@@ -3,3 +3,6 @@ name = "goya-audio-linux"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dev-dependencies]
+goya-audio-dsp.workspace = true

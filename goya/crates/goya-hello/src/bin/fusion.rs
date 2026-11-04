@@ -182,18 +182,24 @@ fn main() {
     );
 
     // 4. Chromatic polarity flip inverts surface, preserves brand accent hue.
-    let dark = resolve(&theme(), Polarity::Dark).unwrap();
-    let light = resolve(&theme(), Polarity::Light).unwrap();
-    check(
-        &mut failures,
-        (dark.accent.h - light.accent.h).abs() <= 1.0,
-        "brand-locked accent hue preserved across polarity",
-    );
-    check(
-        &mut failures,
-        dark.surface_rgb != light.surface_rgb,
-        "surface actually changes across polarity",
-    );
+    match (
+        resolve(&theme(), Polarity::Dark).ok(),
+        resolve(&theme(), Polarity::Light).ok(),
+    ) {
+        (Some(dark), Some(light)) => {
+            check(
+                &mut failures,
+                (dark.accent.h - light.accent.h).abs() <= 1.0,
+                "brand-locked accent hue preserved across polarity",
+            );
+            check(
+                &mut failures,
+                dark.surface_rgb != light.surface_rgb,
+                "surface actually changes across polarity",
+            );
+        }
+        _ => failures.push("theme resolution failed".to_string()),
+    }
 
     // 5. Speculation: only the authorised action commits; stale rejected.
     st.cache.insert(goya_rpi::Preparation {

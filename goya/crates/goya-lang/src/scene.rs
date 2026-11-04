@@ -56,6 +56,19 @@ pub struct Scene {
     pub root: SceneCell,
 }
 
+impl Scene {
+    /// Depth-first search for a cell by name (structural, pre-layout).
+    pub fn find_node(&self, name: &str) -> Option<&SceneCell> {
+        fn walk<'a>(cell: &'a SceneCell, name: &str) -> Option<&'a SceneCell> {
+            if cell.name == name {
+                return Some(cell);
+            }
+            cell.children.iter().find_map(|c| walk(c, name))
+        }
+        walk(&self.root, name)
+    }
+}
+
 /// Millipoint rect (matches GY-LAYOUT/1 semantics).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RectMp {

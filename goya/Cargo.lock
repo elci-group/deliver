@@ -51,6 +51,9 @@ version = "0.1.0"
 [[package]]
 name = "goya-audio-linux"
 version = "0.1.0"
+dependencies = [
+ "goya-audio-dsp",
+]
 
 [[package]]
 name = "goya-bridge"
