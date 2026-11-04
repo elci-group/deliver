@@ -96,11 +96,16 @@ version = "0.1.0"
 dependencies = [
  "goya-audio-dsp",
  "goya-audio-linux",
+ "goya-bridge",
+ "goya-bridge-physics",
+ "goya-chroma",
  "goya-ir",
  "goya-layout",
+ "goya-rpi",
  "goya-runtime",
  "goya-sonic",
  "goya-spatial-audio",
+ "goya-speculation",
  "goya-state",
  "goya-wayland",
 ]

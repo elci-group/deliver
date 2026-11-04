@@ -46,6 +46,7 @@ doctests are excluded (`--lib --tests`); they assert nothing.
 - ✅ GY-CHR-001: chromatic relativism, Deep Copy provenance, dual-mode clipboard
 - ✅ Wave 2 (10-agent swarm): ARSEM spatial audio, NSB bridges, RPI + speculation, EDC determinism, native x402, artifact identity & DCT watermarking — 15 new crates, contracts GY-SONIC/1 … GY-WATERMARK/1
 - ✅ GY-WAYLAND-001: live Wayland surface (release 0.1 gate met); ARSEM 9/9 acceptance; parser under 20k-input mutation fuzz
+- ✅ GY-FUSION-001: fused milestone live — NSB retargetable bridges + ARSEM presentation-tracked pan + chromatic polarity + RPI/speculation gating in one interactive object (10/10 checks)
 - ⬜ Wave 2a: PipeWire backend; Wave 2b: hot-swap + Tov; Wave 3: RUGID/3form/Mesut/Theosis, C2PA, HRTF; Wave 4: a11y conformance, packaging
 - ⬜ Wave 2: Tov adapters, hot-swap, interface reconciliation
 - ⬜ Wave 3: RUGID, 3form, Mesut, Theosis, Vico Vee adapters
