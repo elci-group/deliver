@@ -1,0 +1,11 @@
+[package]
+name = "goya-hello"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+goya-ir.workspace = true
+goya-state.workspace = true
+goya-layout.workspace = true
+goya-runtime.workspace = true
