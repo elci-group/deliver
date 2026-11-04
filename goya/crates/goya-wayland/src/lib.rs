@@ -18,6 +18,7 @@ use wayland_client::protocol::{
     wl_compositor::WlCompositor,
     wl_keyboard::{self, WlKeyboard},
     wl_pointer::{self, WlPointer},
+    wl_region::WlRegion,
     wl_registry::{self, WlRegistry},
     wl_seat::{self, Capability, WlSeat},
     wl_shm::{self, WlShm},
@@ -72,20 +73,50 @@ impl std::fmt::Display for WaylandError {
 
 impl std::error::Error for WaylandError {}
 
-/// Shared-memory pixel buffer for one frame.
+/// One back-buffer: shared-memory slot plus its wl_buffer.
 struct ShmFrame {
-    _fd: OwnedFd,
     map: *mut u8,
     len: usize,
     buffer: WlBuffer,
+    /// wl_buffer Release received: compositor is done reading, safe to write.
+    released: bool,
 }
 // The mapping is owned exclusively by this struct and lives as long as the fd.
 unsafe impl Send for ShmFrame {}
 
 impl ShmFrame {
+    fn pixels_mut(&mut self) -> &mut [u32] {
+        unsafe { std::slice::from_raw_parts_mut(self.map.cast::<u32>(), self.len / 4) }
+    }
+}
+
+impl Drop for ShmFrame {
+    fn drop(&mut self) {
+        if !self.map.is_null() {
+            let _ = unsafe { munmap(self.map.cast(), self.len) };
+        }
+        self.buffer.destroy();
+    }
+}
+
+/// Double-buffered surface memory: one memfd-backed pool, two slots.
+/// The compositor reads one slot while we rasterise the other — the
+/// flicker fix (GY-WAYLAND/1 amendment).
+struct BufferPair {
+    /// Kept alive so the mapped memory's backing file persists; the pool
+    /// holds its own fd reference, so this field is never read directly.
+    #[allow(dead_code)]
+    fd: OwnedFd,
+    map: *mut u8,
+    len_per_slot: usize,
+    slots: [ShmFrame; 2],
+    /// Index of the slot to draw into next.
+    next: usize,
+}
+
+impl BufferPair {
     fn new(
         shm: &WlShm,
-        pool: &mut Option<WlShmPool>,
         qh: &QueueHandle<GoyaWindowInner>,
         width: i32,
         height: i32,
@@ -94,11 +125,11 @@ impl ShmFrame {
         let len = (stride * height) as usize;
         let fd = memfd_create("goya-frame", MemfdFlags::CLOEXEC)
             .map_err(|_| WaylandError::ShmSetup("memfd"))?;
-        ftruncate(&fd, len as u64).map_err(|_| WaylandError::ShmSetup("ftruncate"))?;
+        ftruncate(&fd, (len * 2) as u64).map_err(|_| WaylandError::ShmSetup("ftruncate"))?;
         let map = unsafe {
             mmap(
                 std::ptr::null_mut(),
-                len,
+                len * 2,
                 ProtFlags::READ | ProtFlags::WRITE,
                 MapFlags::SHARED,
                 &fd,
@@ -106,29 +137,42 @@ impl ShmFrame {
             )
         }
         .map_err(|_| WaylandError::ShmSetup("mmap"))? as *mut u8;
-        if pool.is_none() {
-            *pool = Some(shm.create_pool(fd.as_fd(), len as i32, qh, ()));
-        }
-        let pool_ref = pool.as_ref().unwrap();
-        let buffer =
-            pool_ref.create_buffer(0, width, height, stride, wl_shm::Format::Argb8888, qh, ());
-        Ok(ShmFrame {
-            _fd: fd,
-            map,
+        let pool = shm.create_pool(fd.as_fd(), (len * 2) as i32, qh, ());
+        let mk = |offset: i32, released: bool| ShmFrame {
+            map: unsafe { map.byte_add(offset as usize) },
             len,
-            buffer,
+            buffer: pool.create_buffer(
+                offset,
+                width,
+                height,
+                stride,
+                wl_shm::Format::Argb8888,
+                qh,
+                (),
+            ),
+            released,
+        };
+        // Slot 0 starts "released" so the very first present draws into it.
+        let slots = [mk(0, true), mk(len as i32, true)];
+        Ok(BufferPair {
+            fd,
+            map,
+            len_per_slot: len,
+            slots,
+            next: 0,
         })
-    }
-
-    fn pixels_mut(&mut self) -> &mut [u32] {
-        unsafe { std::slice::from_raw_parts_mut(self.map.cast::<u32>(), self.len / 4) }
     }
 }
 
-impl Drop for ShmFrame {
+impl Drop for BufferPair {
     fn drop(&mut self) {
-        let _ = unsafe { munmap(self.map.cast(), self.len) };
-        self.buffer.destroy();
+        // Neutralise per-slot mappings first: the pair owns the whole map.
+        for slot in &mut self.slots {
+            slot.map = std::ptr::null_mut();
+            slot.len = 0;
+            slot.buffer.destroy();
+        }
+        let _ = unsafe { munmap(self.map.cast(), self.len_per_slot * 2) };
     }
 }
 
@@ -151,8 +195,8 @@ struct GoyaWindowInner {
     keyboard: Option<WlKeyboard>,
     last_pointer: Option<(f64, f64)>,
     shift: bool,
-    pool: Option<WlShmPool>,
-    frame: Option<ShmFrame>,
+    buffers: Option<BufferPair>,
+    region: Option<WlRegion>,
     ack_serial: u32,
 }
 
@@ -176,8 +220,8 @@ impl GoyaWindowInner {
             keyboard: None,
             last_pointer: None,
             shift: false,
-            pool: None,
-            frame: None,
+            buffers: None,
+            region: None,
             ack_serial: 0,
         }
     }
@@ -266,36 +310,55 @@ impl GoyaWindow {
     }
 
     /// Map the runtime's render list into shared memory and present it.
+    /// `glyph_px` is the glyph-pixel size in screen pixels (block scaling);
+    /// 1 = tiny terminal-style text, 3–4 reads well at 4 px/pt geometry.
     pub fn present(
         &mut self,
         primitives: &[goya_runtime::Primitive],
         fg: [u8; 3],
         bg: [u8; 3],
+        glyph_px: u32,
     ) -> Result<(), WaylandError> {
-        if self.state.frame.is_none() {
+        if self.state.buffers.is_none() {
             let shm = self
                 .state
                 .shm
                 .clone()
                 .ok_or(WaylandError::MissingGlobal("wl_shm"))?;
             let qh = self.queue.handle();
-            self.state.frame = Some(ShmFrame::new(
+            self.state.buffers = Some(BufferPair::new(
                 &shm,
-                &mut self.state.pool,
                 &qh,
                 self.state.width,
                 self.state.height,
             )?);
         }
-        let frame = self.state.frame.as_mut().unwrap();
-        let pixels = frame.pixels_mut();
+        // Double buffering: prefer a slot the compositor has released. If
+        // both are pending, take the alternate anyway (common client
+        // practice; pump() processes the Release before the next frame).
+        let pair = self.state.buffers.as_mut().unwrap();
+        let idx = if pair.slots[pair.next].released {
+            pair.next
+        } else {
+            1 - pair.next
+        };
+        pair.next = 1 - idx;
+        let pixels = pair.slots[idx].pixels_mut();
         pixels.fill(argb(bg));
         for prim in primitives {
             match prim {
                 goya_runtime::Primitive::Panel(_) => {}
                 goya_runtime::Primitive::Text(r, s) => {
                     fill_rect(pixels, self.state.width, self.state.height, r, [16, 16, 20]);
-                    draw_glyphs(pixels, self.state.width, self.state.height, r, s, fg);
+                    draw_glyphs(
+                        pixels,
+                        self.state.width,
+                        self.state.height,
+                        r,
+                        s,
+                        fg,
+                        glyph_px,
+                    );
                 }
                 goya_runtime::Primitive::Button(r, s) => {
                     fill_rect(
@@ -305,7 +368,32 @@ impl GoyaWindow {
                         r,
                         [80, 100, 180],
                     );
-                    draw_glyphs(pixels, self.state.width, self.state.height, r, s, fg);
+                    draw_glyphs(
+                        pixels,
+                        self.state.width,
+                        self.state.height,
+                        r,
+                        s,
+                        fg,
+                        glyph_px,
+                    );
+                }
+            }
+        }
+        // Opaque hint: the window always fills its bounds — the compositor
+        // can skip blending against undefined content (flicker source).
+        {
+            let surface = self
+                .state
+                .surface
+                .as_ref()
+                .ok_or(WaylandError::MissingGlobal("surface"))?;
+            if self.state.region.is_none() {
+                if let Some(comp) = self.state.compositor.clone() {
+                    let region = comp.create_region(&self.queue.handle(), ());
+                    region.add(0, 0, self.state.width, self.state.height);
+                    surface.set_opaque_region(Some(&region));
+                    self.state.region = Some(region);
                 }
             }
         }
@@ -314,9 +402,10 @@ impl GoyaWindow {
             .surface
             .as_ref()
             .ok_or(WaylandError::MissingGlobal("surface"))?;
-        surface.attach(Some(&frame.buffer), 0, 0);
+        surface.attach(Some(&pair.slots[idx].buffer), 0, 0);
         surface.damage(0, 0, self.state.width, self.state.height);
         surface.commit();
+        pair.slots[idx].released = false;
         Ok(())
     }
 
@@ -369,8 +458,17 @@ fn fill_rect(pixels: &mut [u32], win_w: i32, win_h: i32, r: &Rect, rgb: [u8; 3])
     }
 }
 
-fn draw_glyphs(pixels: &mut [u32], win_w: i32, win_h: i32, r: &Rect, s: &str, rgb: [u8; 3]) {
+fn draw_glyphs(
+    pixels: &mut [u32],
+    win_w: i32,
+    win_h: i32,
+    r: &Rect,
+    s: &str,
+    rgb: [u8; 3],
+    glyph_px: u32,
+) {
     let a = argb(rgb);
+    let g = glyph_px.max(1) as usize;
     let ox = (r.x / MP_PER_PX + 2).max(0) as usize;
     let oy = (r.y / MP_PER_PX + 2).max(0) as usize;
     for (ci, ch) in s.chars().enumerate() {
@@ -378,12 +476,17 @@ fn draw_glyphs(pixels: &mut [u32], win_w: i32, win_h: i32, r: &Rect, s: &str, rg
         for (gy, row) in glyph.iter().enumerate() {
             for gx in 0..5 {
                 if row & (1 << (4 - gx)) != 0 {
-                    let x = ox + ci * 6 + gx;
-                    let y = oy + gy;
-                    if x < win_w as usize && y < win_h as usize {
-                        let idx = y * (win_w as usize) + x;
-                        if idx < pixels.len() {
-                            pixels[idx] = a;
+                    // Block-scale: each glyph pixel is g×g screen pixels.
+                    for dy in 0..g {
+                        for dx in 0..g {
+                            let x = ox + (ci * 6 + gx) * g + dx;
+                            let y = oy + gy * g + dy;
+                            if x < win_w as usize && y < win_h as usize {
+                                let idx = y * (win_w as usize) + x;
+                                if idx < pixels.len() {
+                                    pixels[idx] = a;
+                                }
+                            }
                         }
                     }
                 }
@@ -395,6 +498,46 @@ fn draw_glyphs(pixels: &mut [u32], win_w: i32, win_h: i32, r: &Rect, s: &str, rg
 /// 5x7 glyphs (leftmost pixel = bit 4); unknown characters render as a box.
 fn glyph5x7(c: char) -> [u8; 7] {
     match c {
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        ],
+        '3' => [
+            0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        '6' => [
+            0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+        ],
+        '+' => [0, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0],
+        '-' => [0, 0, 0, 0b11111, 0, 0, 0],
+        '/' => [
+            0b00001, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b10000,
+        ],
+        '*' => [0, 0b00100, 0b10101, 0b01110, 0b10101, 0b00100, 0],
+        '%' => [
+            0b11001, 0b11010, 0b00010, 0b00100, 0b01000, 0b01011, 0b10011,
+        ],
+        '.' => [0, 0, 0, 0, 0, 0b01100, 0b01100],
         'a' => [
             0b011110, 0b100010, 0b100010, 0b111110, 0b100010, 0b100010, 0b100010,
         ],
@@ -590,7 +733,7 @@ impl Dispatch<XdgToplevel, ()> for GoyaWindowInner {
                     state.height = height;
                 }
                 // Drop the fixed-size frame: the next present() reallocates.
-                state.frame = None;
+                state.buffers = None;
                 state
                     .events
                     .push(PlatformEvent::Resized(state.width, state.height));
@@ -862,6 +1005,18 @@ impl Dispatch<WlPointer, ()> for GoyaWindowInner {
             wl_pointer::Event::Leave { .. } => state.last_pointer = None,
             _ => {}
         }
+    }
+}
+
+impl Dispatch<WlRegion, ()> for GoyaWindowInner {
+    fn event(
+        _: &mut Self,
+        _: &WlRegion,
+        _: wayland_client::protocol::wl_region::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
     }
 }
 

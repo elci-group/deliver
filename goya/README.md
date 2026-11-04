@@ -47,6 +47,8 @@ doctests are excluded (`--lib --tests`); they assert nothing.
 - ✅ Wave 2 (10-agent swarm): ARSEM spatial audio, NSB bridges, RPI + speculation, EDC determinism, native x402, artifact identity & DCT watermarking — 15 new crates, contracts GY-SONIC/1 … GY-WATERMARK/1
 - ✅ GY-WAYLAND-001: live Wayland surface (release 0.1 gate met); ARSEM 9/9 acceptance; parser under 20k-input mutation fuzz
 - ✅ GY-FUSION-001: fused milestone live — NSB retargetable bridges + ARSEM presentation-tracked pan + chromatic polarity + RPI/speculation gating in one interactive object (10/10 checks)
+- ✅ **Exemplar app: `apps/calculator.gscene`** — a full calculator authored in Goya scene syntax (`cargo run --bin calculator -- --live --sound`); headless acceptance: 7+3=10, 10*5=50, 50/0=Error, decimals, sign
+- ✅ Flicker fix: double buffering (buffer pair + Release sync), opaque region, dirty-flag redraw (idle 7200 commits → 1)
 - ✅ Wave 2 input/audio/hot-swap: keyboard typing (evdev US subset), window resize, **real audible PipeWire audio** (pw-cat adapter), transactional `.gscene` hot-swap (`--watch`; broken edits rejected, state retained)
 - ✅ GY-LANG-001: **Goya language revised to RUGID-compatible scene syntax** — `@ontology`/`@cell`/`@button` with absolute + proportional geometry; build a GUI from a `.gscene` file: `cargo run --bin scene --file app.gscene --live`
 - ⬜ Wave 2a: PipeWire backend; Wave 2b: hot-swap + Tov; Wave 3: RUGID/3form/Mesut/Theosis, C2PA, HRTF; Wave 4: a11y conformance, packaging

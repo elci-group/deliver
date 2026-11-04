@@ -18,7 +18,7 @@ mod scene;
 pub use hotswap::SceneStore;
 pub use lexer::{lex, LexError, Token, TokenKind};
 pub use parser::{parse, ParseError};
-pub use scene::{hit_test, layout, Anchor, CellKind, DrawNode, Scene, SceneCell, Vec3};
+pub use scene::{hit_test, layout, Anchor, CellKind, DrawNode, RectMp, Scene, SceneCell, Vec3};
 
 /// Contract identifier implemented by this crate.
 pub const LANG_CONTRACT: &str = "GY-LANG/1";
