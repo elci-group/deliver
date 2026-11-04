@@ -326,3 +326,84 @@ and retains state across a failed reload".
 `goya-runtime` hello text now binds the `typed` state key (keyboard input
 path demonstrated end-to-end: compositor → KeyChar → `Event::Character`
 → state transaction → relayout → presented frame).
+
+---
+
+# Efficiency Hierarchy — GY-LCPE-001, GY-RARS-001, GY-CSR-001, GY-HCAR-001
+
+Implemented as four new crates (all std-only, Candidate status):
+
+## GY-CHANGE/1 — Localised Change Potential Efficiency (`crates/goya-change`)
+- `ChangeEnvelope` per directive §5: object, revision, `PropertyMask`
+  persistent/mutable, `EventRule`s, conservative `spatial_bounds`,
+  `resolution_tile`.
+- `CausalResolver`: input→transition→dirty-region causality. Events are
+  **rejected by default** (capability-style); a rendered pixel changing
+  never causes a state transition through this path (no feedback loops).
+- Resolution-aware invalidation: dirty regions quantise to device-pixel
+  tiles, growing **conservatively** (never smaller than the true area).
+- Persistence enforcement: transitions may not produce dirty regions for
+  properties the envelope marks persistent.
+- Cost model (§8): `C_local = resolve + commit + render` vs `C_full`;
+  regions union first (one commit); local chosen only when strictly
+  cheaper. Full-frame is always permitted.
+- Critical qualification enforced: quantisation affects presentation only;
+  authoritative state (revision anchor) is independent of pixels.
+- 8 tests: causality authorisation, persistence blocking, quantisation,
+  cost-model boundaries, resolution hierarchy, semantic preservation.
+
+## GY-RARS/1 — Resolution-Adaptive Resource Scaling (`crates/goya-rars`)
+- `FidelityResolver`: deterministic pure function of
+  (ProjectionFidelityContext, policy_version). Never touches state.
+- Screen-space-error subdivision model (§3): n ≈ √(1/ε_px), clamped [2,64].
+- **Spatial and temporal complexity are independent** (§2): a small
+  fast-moving object gets reduced raster scale but Continuous updates.
+- Accessibility policy: text fidelity protected (glyph_px ≥ 2 when
+  protect_text) regardless of projected size; E_interaction = 0.
+- `Hysteresis` (§8): fidelity-level changes require N consecutive
+  confirmations; first observation seeds residency immediately.
+- 7 tests incl. the directive's 1.9%-of-4K model check.
+
+## GY-CSR/1 — Core-Split Rendering scheduler (`crates/goya-csr`)
+- Partition the **affected change envelope**, not the frame (§3): serial /
+  dual-horizontal / quad-corner policies over a tile grid, worker-budget
+  capped.
+- Partitioning defines work OWNERSHIP, not draw order; territories are
+  provably disjoint and complete (unit-tested).
+- Greedy work stealing: idle workers take from the largest queue
+  (§5) — unit-tested rebalancing under uneven territories.
+- Policy selection avoids parallel overhead for small workloads (§3):
+  ≤4 tiles → serial. Worker budget, never raw CPU count (§2).
+- 6 tests. (Tile-parallel raster execution lands with the GPU/tile
+  renderer backends; this crate is the deterministic scheduler contract.)
+
+## GY-HCAR/1 — Heterogeneous core classification (`crates/goya-hcar`)
+- Per-work-item classification (never per quadrant permanently, §2):
+  E-core deadline violation or critical-path ⇒ P-core mandatory;
+  otherwise energy-minimising choice among feasible classes (§3:
+  min Σ E subject to deadlines).
+- Homogeneous CPUs degrade to `General` (§6).
+- `Residency` migration hysteresis (§6): class changes require N
+  consecutive confirmations; seeded on first observation.
+- Affinity modes: OsManaged default / Advisory / Controlled (§7).
+- Temporal persistence expressed in tests (§4): cheap-but-critical scroll
+  tiles → P; relaxed status indicators → E.
+- 8 tests.
+
+## Integration (demonstrated in `goya-calculator`)
+- LCPE: envelopes compiled from resolved scene geometry per generation;
+  presses resolve → quantised dirty regions → cost decision →
+  `present_dirty` partial damage to the compositor.
+- RARS: glyph fidelity resolved from the projected window vs 4K
+  (3.28% → balanced quality, protected-text glyph 4px).
+- Pipeline status: LCPE ✓ RARS ✓ CSR scheduler ✓ HCAR classifier ✓ —
+  the remaining integration (tile-parallel raster with HCAR affinity)
+  is Wave-2c work alongside the GPU backend decision.
+
+## Ownership
+| Path | Owner |
+|---|---|
+| crates/goya-change | Efficiency Swarm M1 (LCPE) |
+| crates/goya-rars | Efficiency Swarm M2 (RARS) |
+| crates/goya-csr | Efficiency Swarm M3 (CSR) |
+| crates/goya-hcar | Efficiency Swarm M4 (HCAR) |

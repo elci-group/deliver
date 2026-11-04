@@ -26,6 +26,10 @@ members = [
     "crates/goya-watermark",
     "crates/goya-wayland",
     "crates/goya-lang",
+    "crates/goya-change",
+    "crates/goya-rars",
+    "crates/goya-csr",
+    "crates/goya-hcar",
 ]
 
 [workspace.package]
@@ -58,6 +62,10 @@ goya-artifact = { path = "crates/goya-artifact" }
 goya-watermark = { path = "crates/goya-watermark" }
 goya-wayland = { path = "crates/goya-wayland" }
 goya-lang = { path = "crates/goya-lang" }
+goya-change = { path = "crates/goya-change" }
+goya-rars = { path = "crates/goya-rars" }
+goya-csr = { path = "crates/goya-csr" }
+goya-hcar = { path = "crates/goya-hcar" }
 
 [profile.release]
 debug = true

@@ -68,6 +68,10 @@ name = "goya-bridge-physics"
 version = "0.1.0"
 
 [[package]]
+name = "goya-change"
+version = "0.1.0"
+
+[[package]]
 name = "goya-chroma"
 version = "0.1.0"
 
@@ -76,6 +80,13 @@ name = "goya-clipboard"
 version = "0.1.0"
 dependencies = [
  "goya-provenance",
+]
+
+[[package]]
+name = "goya-csr"
+version = "0.1.0"
+dependencies = [
+ "goya-change",
 ]
 
 [[package]]
@@ -94,6 +105,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "goya-hcar"
+version = "0.1.0"
+
+[[package]]
 name = "goya-hello"
 version = "0.1.0"
 dependencies = [
@@ -101,10 +116,14 @@ dependencies = [
  "goya-audio-linux",
  "goya-bridge",
  "goya-bridge-physics",
+ "goya-change",
  "goya-chroma",
+ "goya-csr",
+ "goya-hcar",
  "goya-ir",
  "goya-lang",
  "goya-layout",
+ "goya-rars",
  "goya-rpi",
  "goya-runtime",
  "goya-sonic",
@@ -134,6 +153,10 @@ dependencies = [
 
 [[package]]
 name = "goya-provenance"
+version = "0.1.0"
+
+[[package]]
+name = "goya-rars"
 version = "0.1.0"
 
 [[package]]

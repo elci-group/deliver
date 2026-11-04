@@ -124,7 +124,12 @@ impl P {
                     return Ok(cell);
                 }
                 Some(TokenKind::AtWord) => {
-                    let word = self.bump().unwrap().text;
+                    // The match guard guarantees a token exists; still
+                    // explicit rather than unwrap.
+                    let Some(tok) = self.bump() else {
+                        return Err(ParseError { line: self.line() });
+                    };
+                    let word = tok.text;
                     match word.as_str() {
                         "cell" | "button" => {
                             let kind = if word == "button" {

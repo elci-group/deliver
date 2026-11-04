@@ -15,7 +15,15 @@
 
 use goya_audio_dsp::{limit, Limiter, Tap};
 use goya_audio_linux::{AudioOutput, PwCatOutput};
+use goya_change::{
+    decide, CausalResolver, ChangeEnvelope, CostModel, EventRule, Invalidation, PixelRect,
+    PropertyMask,
+};
 use goya_lang::{hit_test, layout, Anchor, DrawNode, RectMp, SceneStore};
+use goya_rars::{
+    AccessibilityPolicy, DevicePixelSize, ErrorBudget, FidelityResolver, MotionProfile,
+    ProjectionFidelityContext,
+};
 use goya_runtime::Primitive;
 use goya_spatial_audio::{pan_from_rect, StereoPan};
 
@@ -337,6 +345,72 @@ fn main() {
         return;
     }
 
+    // ---- LCPE (GY-CHANGE/1): compile change envelopes for the display
+    // panel and every button from the resolved scene geometry ------------
+    let frame0 = layout(store.get(), 100.0, 170.0);
+    let mut resolver = CausalResolver::default();
+    for node in &frame0.nodes {
+        let persistent = if node.is_button {
+            PropertyMask(PropertyMask::TEXT | PropertyMask::GEOMETRY)
+        } else {
+            PropertyMask(PropertyMask::GEOMETRY)
+        };
+        resolver.register(ChangeEnvelope {
+            object: node.name.clone(),
+            revision: store.generation(),
+            persistent,
+            mutable: PropertyMask(PropertyMask::ALL),
+            event_rules: if node.is_button {
+                vec![EventRule {
+                    event: "pointer.press".into(),
+                    causes: vec!["pressed".into(), "hover".into()],
+                }]
+            } else {
+                vec![EventRule {
+                    event: "state.value".into(),
+                    causes: vec!["value".into()],
+                }]
+            },
+            spatial_bounds: PixelRect {
+                x: node.rect.x as i32 / goya_wayland::MP_PER_PX as i32,
+                y: node.rect.y as i32 / goya_wayland::MP_PER_PX as i32,
+                width: node.rect.width as i32 / goya_wayland::MP_PER_PX as i32,
+                height: node.rect.height as i32 / goya_wayland::MP_PER_PX as i32,
+            },
+            resolution_tile: 8,
+        });
+    }
+    let cost_model = CostModel::default();
+
+    // ---- RARS (GY-RARS/1): glyph fidelity from the projected resolution
+    let rars = FidelityResolver::default();
+    let rars_ctx = ProjectionFidelityContext {
+        projected_size: DevicePixelSize {
+            width: WIN_W_PX as u32,
+            height: WIN_H_PX as u32,
+        },
+        device_scale: 1.0,
+        motion: MotionProfile { velocity_px_s: 0.0 },
+        error: ErrorBudget {
+            spatial_px: 0.5,
+            temporal_ms: 8.0,
+        },
+        accessibility: AccessibilityPolicy {
+            protect_text: true,
+            min_hit_target_px: 48,
+        },
+    };
+    let fidelity = rars.resolve(&rars_ctx);
+    println!(
+        "goya-calculator: RARS glyph_px={} subdivisions={} quality={} (window {}x{} vs 4K = {:.2}%)",
+        fidelity.glyph_px,
+        fidelity.spatial_subdivisions,
+        fidelity.effect_quality,
+        WIN_W_PX,
+        WIN_H_PX,
+        rars_ctx.relative_area() * 100.0
+    );
+
     let mut win = match goya_wayland::GoyaWindow::create("goya-calculator", WIN_W_PX, WIN_H_PX) {
         Ok(w) => w,
         Err(e) => {
@@ -350,6 +424,7 @@ fn main() {
     let mut frames = 0u32;
     let mut presents = 0u32;
     let mut dirty = true; // first frame always paints
+    let mut lcpe_damage: Option<(i32, i32, i32, i32)> = None;
     let mut last_shown = String::new();
     while frames < max_frames && !win.close_requested() {
         if watch {
@@ -392,6 +467,38 @@ fn main() {
                             let rect = frame.find(&name).map(|n| n.rect);
                             calc.press(&name);
                             dirty = true;
+                            // LCPE: event → authorised transitions →
+                            // quantised dirty regions → local vs full cost
+                            // decision. The display cell changes via the
+                            // "value" transition; the button via "pressed".
+                            let mut dirty_rects: Vec<PixelRect> = Vec::new();
+                            for t in resolver.resolve(&name, "pointer.press", "pressed") {
+                                if let Some(d) = t.dirty {
+                                    dirty_rects.push(d);
+                                }
+                            }
+                            for t in resolver.resolve("result_text", "state.value", "value") {
+                                if let Some(d) = t.dirty {
+                                    dirty_rects.push(d);
+                                }
+                            }
+                            let px_rects: Vec<PixelRect> = dirty_rects
+                                .iter()
+                                .map(|r| PixelRect {
+                                    x: r.x,
+                                    y: r.y,
+                                    width: r.width,
+                                    height: r.height,
+                                })
+                                .collect();
+                            match decide(&px_rects, &cost_model) {
+                                Invalidation::Local(r) => {
+                                    lcpe_damage = Some((r.x, r.y, r.width, r.height));
+                                }
+                                Invalidation::FullFrame => {
+                                    lcpe_damage = None;
+                                }
+                            }
                             if let Some(r) = rect {
                                 play_tap(&mut audio, &mut pan, r);
                             }
@@ -420,7 +527,19 @@ fn main() {
             let nodes = layout(store.get(), 100.0, 170.0).nodes;
             let nodes = with_result(nodes, &calc.shown());
             let prims = present_nodes(&nodes);
-            let _ = win.present(&prims, [235, 235, 240], [20, 20, 28], 4);
+            let _ = win.present_dirty(
+                &prims,
+                [235, 235, 240],
+                [20, 20, 28],
+                fidelity.glyph_px.max(2),
+                lcpe_damage,
+            );
+            if let Some((dx, dy, dw, dh)) = lcpe_damage {
+                println!(
+                    "goya-calculator: LCPE local invalidation {}x{} @ {},{}",
+                    dw, dh, dx, dy
+                );
+            }
             last_shown = calc.shown();
             presents += 1;
             dirty = false;

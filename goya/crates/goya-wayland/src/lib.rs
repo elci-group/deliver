@@ -319,6 +319,21 @@ impl GoyaWindow {
         bg: [u8; 3],
         glyph_px: u32,
     ) -> Result<(), WaylandError> {
+        self.present_dirty(primitives, fg, bg, glyph_px, None)
+    }
+
+    /// LCPE-aware presentation: `damage` is the resolved dirty rect in
+    /// pixels (from goya-change's quantised envelope); None = full frame.
+    /// The slot is always fully rasterised (small surfaces); locality is
+    /// expressed to the compositor via partial damage.
+    pub fn present_dirty(
+        &mut self,
+        primitives: &[goya_runtime::Primitive],
+        fg: [u8; 3],
+        bg: [u8; 3],
+        glyph_px: u32,
+        damage: Option<(i32, i32, i32, i32)>,
+    ) -> Result<(), WaylandError> {
         if self.state.buffers.is_none() {
             let shm = self
                 .state
@@ -403,7 +418,12 @@ impl GoyaWindow {
             .as_ref()
             .ok_or(WaylandError::MissingGlobal("surface"))?;
         surface.attach(Some(&pair.slots[idx].buffer), 0, 0);
-        surface.damage(0, 0, self.state.width, self.state.height);
+        // LCPE locality: damage only the changed region when the caller
+        // resolved one; otherwise the whole surface.
+        match damage {
+            Some((dx, dy, dw, dh)) => surface.damage(dx, dy, dw, dh),
+            None => surface.damage(0, 0, self.state.width, self.state.height),
+        }
         surface.commit();
         pair.slots[idx].released = false;
         Ok(())
