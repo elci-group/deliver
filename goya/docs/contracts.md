@@ -257,3 +257,31 @@ compatibility and programmatic use. New GUI authoring targets GY-LANG/1.
 Unification plan: a GY-IR/2 amendment will define a shared node table so
 both frontends lower into one IR; scheduled Wave 2c alongside the EDC
 canonical IR work.
+
+## Correction — Vico Vee reconnaissance (2026-11-04)
+
+The GY-001 reconnaissance table incorrectly identified Vico Vee as the thin
+Tauri discovery GUI at `~/vee-gui`. The directive-relevant component is the
+**ViCo Execution Environment** at
+`~/vico-desktop/src-tauri/vico-vee` (v0.2.20):
+
+- Standalone sandboxed execution service, extracted from vico-desktop, REST
+  API on :9987 (submit / status / cancel / artifacts / backups).
+- **Exactly Goya's containment layer**: capability-based security with
+  Ed25519-signed grants, worker isolation via rlimits + Landlock +
+  seccomp-bpf, wall-clock budgets with cancellation, content-addressed
+  artifact store, multi-tenant project isolation, Prometheus metrics.
+- **Has a lib target** (`src/lib.rs`, 26 `pub mod`s: capability, artifact,
+  audit, checkpoint, daemon, …) plus the `vico-vee` binary — no extraction
+  work needed, unlike the earlier assessment claimed.
+- Tool integration contracts (`docs/vee-tool-integration-contracts.md`)
+  already define the governance Goya needs: capabilities declared before
+  execution, typed artifacts, budget/cancellation, no credential passthrough.
+
+Consequences for the DAG:
+- Wave 3a changes from "Vico Vee library extraction" to **"VEE adapter:
+  route Goya EDC executable units and agent tool calls through VEE's
+  capability/budget/artifact machinery"** — a much smaller, better-fitting
+  package. VEE is a strong candidate to *be* the 0.3 "Contained Modules"
+  enforcement point rather than a peer to integrate.
+- The Wave-1 evidence table row for Vico Vee is superseded by this section.
